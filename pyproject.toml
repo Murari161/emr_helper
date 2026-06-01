@@ -31,6 +31,15 @@ dependencies = [
 
     # Ollama HTTP client
     "httpx>=0.27,<1.0",
+
+    # Cross-encoder reranker for the RAG pipeline. sentence-transformers
+    # lazily loads BAAI/bge-reranker-v2-m3 in-process (CPU). Adds ~1 GB to
+    # the image (torch+transformers); the model itself is ~600 MB and is
+    # downloaded into a HuggingFace cache on first use. We considered using
+    # Ollama for this but Ollama has no cross-encoder reranking API — its
+    # /api/embeddings is bi-encoder-only, which produces wrong relevance
+    # signals for (query, doc) scoring.
+    "sentence-transformers>=3.0,<6.0",
 ]
 
 [project.optional-dependencies]

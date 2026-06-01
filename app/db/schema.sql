@@ -122,16 +122,18 @@ CREATE TABLE IF NOT EXISTS chunks (
     -- this column type and re-ingesting everything.
     embedding       vector(1024),
 
-    -- Postgres-maintained full-text search vector. The COALESCE handles
-    -- NULL when_to_use cleanly. We include image_captions in the FTS field
-    -- so screenshot captions contribute to BM25 ranking.
+    -- Postgres-maintained full-text search vector with FIELD WEIGHTING.
+    -- Without weights, a procedure that mentions "register" three times in
+    -- its body content can outrank a procedure literally titled "Register
+    -- a patient". setweight() assigns labels A/B/C/D to slices of the
+    -- tsvector; ts_rank_cd then uses default weights {0.1, 0.2, 0.4, 1.0}
+    -- for {D, C, B, A} respectively. Title gets A (1.0×), when_to_use
+    -- gets B (0.4×), content gets C (0.2×), image_captions gets D (0.1×).
     tsv             tsvector GENERATED ALWAYS AS (
-                        to_tsvector('english',
-                            coalesce(title, '')          || ' ' ||
-                            coalesce(when_to_use, '')    || ' ' ||
-                            coalesce(content, '')        || ' ' ||
-                            coalesce(image_captions, '')
-                        )
+                        setweight(to_tsvector('english', coalesce(title, '')),          'A') ||
+                        setweight(to_tsvector('english', coalesce(when_to_use, '')),    'B') ||
+                        setweight(to_tsvector('english', coalesce(content, '')),        'C') ||
+                        setweight(to_tsvector('english', coalesce(image_captions, '')), 'D')
                     ) STORED,
 
     created_at      timestamptz NOT NULL DEFAULT now()

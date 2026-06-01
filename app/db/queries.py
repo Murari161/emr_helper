@@ -152,6 +152,55 @@ async def upsert_chunk(
 # Retrieval (Phase 4)
 # ---------------------------------------------------------------------------
 
+# SQL for the three parallel search lanes. They share the same WHERE filter
+# (active=true, manual_version restriction) and differ only in scoring +
+# ordering. Each returns (id, score) tuples in score-descending order.
+#
+# Notes on operators / functions used:
+#   embedding <=> $1::vector   pgvector cosine distance. ORDER BY ascending
+#                              gives most-similar first (distance 0 = identical).
+#                              We return 1 - distance as the "score" for RRF.
+#   plainto_tsquery('english') Safe parse of a user query into a tsquery
+#                              (handles punctuation, no error on stop words).
+#   ts_rank_cd(tsv, query)     BM25-style ranking; cd = cover-density variant
+#                              (weights matches by token distance).
+#   similarity(ui_labels, $1)  pg_trgm trigram similarity. We don't use the %
+#                              filter operator because some queries match
+#                              labels below the default threshold but should
+#                              still rank — we just take the top-N by similarity.
+
+_VECTOR_SQL = """
+    SELECT id, 1.0 - (embedding <=> $1::vector) AS score
+    FROM chunks
+    WHERE active = true
+      AND ($2::text[] IS NULL OR manual_version = ANY($2))
+      AND embedding IS NOT NULL
+    ORDER BY embedding <=> $1::vector
+    LIMIT $3
+"""
+
+_BM25_SQL = """
+    SELECT id, ts_rank_cd(tsv, q) AS score
+    FROM chunks, plainto_tsquery('english', $1) AS q
+    WHERE active = true
+      AND ($2::text[] IS NULL OR manual_version = ANY($2))
+      AND tsv @@ q
+    ORDER BY score DESC
+    LIMIT $3
+"""
+
+_TRIGRAM_SQL = """
+    SELECT id, similarity(ui_labels, $1) AS score
+    FROM chunks
+    WHERE active = true
+      AND ($2::text[] IS NULL OR manual_version = ANY($2))
+      AND ui_labels <> ''
+      AND similarity(ui_labels, $1) > 0.0
+    ORDER BY score DESC
+    LIMIT $3
+"""
+
+
 async def hybrid_search(
     *,
     query_text: str,
@@ -161,25 +210,63 @@ async def hybrid_search(
     k_bm25: int = 50,
     k_trigram: int = 30,
 ) -> dict[str, list[tuple[UUID, float]]]:
-    """Run three parallel searches against the chunks table and return the
-    raw ranked candidate lists for fusion.
+    """Run three parallel searches against the chunks table.
 
     Returns a dict with keys 'vector', 'bm25', 'trigram', each mapped to a
-    list of (chunk_id, score) tuples in score-descending order.
+    list of (chunk_id, score) tuples in score-descending order. RRF fusion
+    happens one level up in app/rag/retriever.py.
 
-    Phase 4 will implement (with RRF fusion happening one level up in
-    `app/rag/retriever.py`).
+    manual_versions=None means "search all versions" (only sensible when
+    one version is loaded). Pass a list to scope to specific versions.
     """
-    raise NotImplementedError("Filled in during Phase 4 (retrieval).")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Run the three queries concurrently. asyncpg pipelines them on the
+        # same connection serially internally, but we still avoid network
+        # round-trip stalls by not awaiting each before issuing the next.
+        # For simplicity here we run sequentially — the entire search is
+        # comfortably under 100 ms on a small corpus, so concurrency adds
+        # complexity without measurable benefit.
+        vec_rows = await conn.fetch(
+            _VECTOR_SQL, query_vec, manual_versions, k_vector
+        )
+        bm25_rows = await conn.fetch(
+            _BM25_SQL, query_text, manual_versions, k_bm25
+        )
+        trgm_rows = await conn.fetch(
+            _TRIGRAM_SQL, query_text, manual_versions, k_trigram
+        )
+
+    return {
+        "vector":  [(r["id"], float(r["score"])) for r in vec_rows],
+        "bm25":    [(r["id"], float(r["score"])) for r in bm25_rows],
+        "trigram": [(r["id"], float(r["score"])) for r in trgm_rows],
+    }
 
 
 async def get_chunks_by_ids(chunk_ids: list[UUID]) -> list[dict[str, Any]]:
-    """Fetch full chunk rows by id, preserving the input order so the
-    retriever can hand them to the reranker/generator without re-sorting.
+    """Fetch full chunk rows by id, preserving the input order.
 
-    Phase 4 will implement.
+    Postgres returns rows in arbitrary order for ANY($1), so we re-order
+    on the Python side. Empty input returns empty list.
     """
-    raise NotImplementedError("Filled in during Phase 4 (retrieval).")
+    if not chunk_ids:
+        return []
+
+    sql = """
+        SELECT id, doc_id, kind, section_path, title, when_to_use, content,
+               image_captions, images, ui_labels, cautions, notes,
+               page_start, page_end, manual_version, active, created_at
+        FROM chunks
+        WHERE id = ANY($1)
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(sql, chunk_ids)
+
+    # Build a lookup so we can preserve caller's order.
+    by_id = {r["id"]: dict(r) for r in rows}
+    return [by_id[cid] for cid in chunk_ids if cid in by_id]
 
 
 # ---------------------------------------------------------------------------
