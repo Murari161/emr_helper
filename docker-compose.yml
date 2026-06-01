@@ -52,6 +52,12 @@ services:
       - ./app:/app/app
       - ./scripts:/app/scripts
       - ./tests:/app/tests
+      # /app/public serves static assets (logo, favicon, CSS) that Chainlit
+      # exposes at /public/*. Bind-mounting it means dropping a new logo on
+      # the host immediately shows up after a browser refresh.
+      - ./public:/app/public
+      - ./chainlit.md:/app/chainlit.md
+      - ./.chainlit:/app/.chainlit
       # Persist the HuggingFace model cache across container recreations,
       # so the cross-encoder (BAAI/bge-reranker-v2-m3, ~600 MB) is downloaded
       # exactly once instead of every time we `docker compose up --force-recreate`.

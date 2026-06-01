@@ -87,11 +87,16 @@ async def on_chat_start() -> None:
 
     await cl.Message(
         content=(
-            "**EMR Helper** is online.\n\n"
-            "I answer questions from the EMR user manuals — registration, "
-            "queueing, appointments, reports, and so on.\n\n"
-            "ℹ️  I do **not** read patient data and I do **not** give clinical advice. "
-            "Try one of the suggested questions or ask your own."
+            "👋 Hi! I'm **EMR Helper** — your guide to the Ministry of Health "
+            "EMR system.\n\n"
+            "Ask me how to do anything from the user manuals — registering a "
+            "patient, queueing them for a doctor, closing a clinic session, "
+            "scheduling reminders, generating reports — and I'll walk you "
+            "through the steps with the **screenshots** from the manual.\n\n"
+            "ℹ️ I **don't** read patient data and I **don't** give clinical "
+            "advice. For clinical questions, please consult a clinician or "
+            "your clinical reference.\n\n"
+            "Try one of the suggestions below, or ask anything in your own words."
         ),
     ).send()
 

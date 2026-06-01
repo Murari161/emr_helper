@@ -1,0 +1,40 @@
+/* EMR Helper — custom UI tweaks.
+ * Loaded by Chainlit via .chainlit/config.toml > [UI] custom_css.
+ *
+ * Goal of v1: make the MoH coat-of-arms logo visibly larger in the
+ * header. The original PNG is portrait-orientation; Chainlit's default
+ * header constraints squeeze it into a tiny badge. We bump max-height
+ * and let width follow proportionally.
+ */
+
+/* Catch the logo regardless of which specific class Chainlit's React
+ * component happens to emit. Several selector patterns to be resilient
+ * to Chainlit version bumps. */
+img[src*="/logo"],
+img[alt="logo"i],
+img[alt*="logo"i],
+[class*="logo" i] img,
+[data-testid*="logo" i] img,
+[data-testid*="logo" i] {
+    max-height: 64px !important;
+    height: 64px !important;
+    width: auto !important;
+    object-fit: contain !important;
+}
+
+/* If Chainlit's header has a tight fixed height that clips the logo,
+ * give it a touch more room. Header selectors vary by version too. */
+header,
+[class*="Header" i],
+[role="banner"] {
+    min-height: 72px !important;
+    height: auto !important;
+}
+
+/* The welcome-screen logo (different element, sometimes 'cl-welcome-logo'
+ * or rendered inside a hero block). Slightly larger there since there's room. */
+[class*="welcome" i] img[src*="/logo"],
+[class*="hero" i]    img[src*="/logo"] {
+    max-height: 120px !important;
+    height: 120px !important;
+}

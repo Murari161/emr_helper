@@ -24,11 +24,14 @@ latex = false
 
 [UI]
 name = "EMR Helper"
-description = "Documentation assistant for the Ministry of Health EMR system."
-# Show a permanent banner reminding users this is not a clinical tool.
+description = "Documentation assistant for the Ministry of Health Uganda EMR system. Ask how to do any task and get the steps + screenshots from the official user manuals. Does not access patient data and does not give clinical advice."
 default_collapse_content = true
-# Light theme by default — most hospital staff use bright environments.
 default_theme = "light"
+# Custom CSS to enlarge the MoH coat-of-arms logo in the header.
+# Served by Chainlit's static handler from the project's public/ folder.
+custom_css = "/public/style.css"
+# CTA shown on the welcome screen above the suggested-question buttons.
+cot = "tool_call"
 
 [meta]
 generated_by = "phase-1-scaffold"

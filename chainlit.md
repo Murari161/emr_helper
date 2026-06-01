@@ -1,19 +1,46 @@
-# Welcome to EMR Helper
+# Welcome to **EMR Helper**
 
-EMR Helper is a documentation assistant for the **Ministry of Health Electronic Medical Records** system. Ask it how to use the EMR — it will walk you through the steps, with the relevant screenshots, straight from the official user manuals.
-
-## What I can do
-
-- Explain how to **register a patient**, **queue a patient**, **set an appointment**, **generate a report**, and every other procedure in the user manuals.
-- Show you the **exact button names** and **screenshots** from the manual.
-- Cite the **section of the manual** each answer came from.
-
-## What I cannot do
-
-- I do **not** connect to the EMR database. I cannot look up patient records, queue status, or any live data.
-- I do **not** give **clinical advice**. If you have a medical question — what to prescribe, how to diagnose, drug interactions — please consult a clinician or the appropriate clinical reference.
-- I only know what is in the user manuals I have been given. If you ask about a feature that is not documented, I will tell you so honestly rather than guess.
+Your assistant for navigating the **Ministry of Health Electronic Medical Records** system. Ask me how to do any task and I'll walk you through it — with the **exact buttons**, **screenshots**, and the **section of the manual** the answer came from.
 
 ---
 
-If you spot a wrong or incomplete answer, please use the 👍 / 👎 buttons on each response. Your feedback is logged so the manuals can be improved.
+## What I can help with
+
+- 🆕 **Registration** — register new patients, update records, manage extended bio fields.
+- 🚶 **Queueing** — add patients to clinic queues, queue returning patients, close clinic sessions.
+- 🔬 **Direct services** — send patients to the laboratory, imaging, or for a minor procedure.
+- 📅 **Appointments** — schedule, view, delete appointments; set reminders.
+- 📊 **Reports** — generate clinical reports, view mortality records, view referred-facility stats.
+- ⚙️ **Customization** — manage visit types, relationship types, referring facilities, and more.
+
+If you're not sure where to start, try one of the **suggested questions** at the bottom of the welcome screen, or just ask in your own words.
+
+---
+
+## What I **cannot** do
+
+| Off-limits | Why |
+|---|---|
+| Look up **patient data** | I don't connect to the EMR database. I don't know who's admitted, what their diagnosis is, or any clinical details. |
+| Give **clinical advice** | I'm a documentation assistant, not a clinician. I won't tell you what to prescribe, how to diagnose, or how to treat. Please consult a clinician or your clinical reference. |
+| Answer about **features not in the manual** | If the procedure isn't documented in a manual I've been given, I'll say so honestly rather than guess. |
+
+---
+
+## How to get the best answers
+
+- **Use the names you see on screen.** "How do I close a clinic session?" works better than "how do I end the day."
+- **Mention the screen you're on** if it helps: *"On the Queued Patients tab, what does the Save to Queue button do?"*
+- **Ask follow-ups.** If an answer is too brief, ask for more detail on a specific step.
+- **Tell us when we're wrong.** Use the 👍 / 👎 buttons under each answer — it's logged and helps improve the system.
+
+---
+
+## A note on privacy
+
+EMR Helper does **not** read or store any patient information. The only things logged are:
+- The text of your questions (so we can improve answers over time).
+- Which manual sections were used to answer.
+- Your username, hashed.
+
+No patient names, IDs, diagnoses, or any clinical content. Ever.
