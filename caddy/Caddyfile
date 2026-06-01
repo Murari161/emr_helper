@@ -1,0 +1,37 @@
+# EMR Helper reverse proxy.
+#
+# Phase 1: basic auth in front of the app. The user is added to the
+# `X-User` header so the app knows who is asking (without ever seeing
+# the password). Replace with OIDC in a later iteration.
+#
+# To generate a password hash:
+#   docker run --rm caddy:2-alpine caddy hash-password --plaintext 'your-password'
+# Then paste the hash (starts with `$2a$...`) into the basic_auth block below.
+
+:8000 {
+	# Health check endpoint that bypasses auth so docker-compose can probe it.
+	@health path /healthz
+	respond @health "ok" 200
+
+	# Everything else requires basic auth.
+	basic_auth {
+		# username   bcrypt-hash
+		# Placeholder hash for 'change-me' — REGENERATE before any real deployment.
+		admin $2a$14$placeholderplaceholderplaceholderplaceholderplaceholderplaceholderx
+	}
+
+	# Pass the authenticated user to the app.
+	reverse_proxy app:8000 {
+		header_up X-User {http.auth.user.id}
+		# Chainlit uses websockets for streaming.
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

@@ -1,0 +1,13 @@
+# Force LF line endings for everything that runs in a Linux container.
+# Avoids "bad interpreter: ^M" errors when developing on Windows.
+* text=auto eol=lf
+
+# Binary file types (preserve as-is).
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.pdf   binary
+*.docx  binary
+*.xlsx  binary
+*.zip   binary

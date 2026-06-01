@@ -1,0 +1,87 @@
+# EMR Helper — single-host deployment.
+#
+# Bring everything up with:
+#   docker compose up -d
+#   docker compose exec ollama ollama pull bge-m3 llama3.2:3b bge-reranker-v2-m3
+#   docker compose exec app python -m scripts.ingest /data/knowledge_base/
+#
+# Notes:
+#  - All bind mounts use relative paths so the file is portable Windows<->Linux.
+#  - Only Caddy publishes a port to the host; db and ollama stay on the
+#    internal Docker network. Do not add `ports:` to them in production.
+#  - `restart: unless-stopped` keeps services up across host reboots.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "8000:8000"   # change to "80:80" + "443:443" once you have a real hostname
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    networks: [emr_net]
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Override .env values that should always reflect docker-compose topology.
+      DATABASE_URL: postgresql://emr:emr@db:5432/emr_helper
+      OLLAMA_BASE_URL: http://ollama:11434
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks: [emr_net]
+
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: emr
+      POSTGRES_PASSWORD: emr
+      POSTGRES_DB: emr_helper
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # schema.sql lands here in Phase 2; runs once on first start.
+      - ./app/db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U emr -d emr_helper"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [emr_net]
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    # CPU-only deployment. To enable GPU later, add:
+    #   deploy:
+    #     resources:
+    #       reservations:
+    #         devices:
+    #           - capabilities: [gpu]
+    volumes:
+      - ollama_data:/root/.ollama
+    networks: [emr_net]
+
+networks:
+  emr_net:
+    driver: bridge
+
+volumes:
+  pgdata:
+  ollama_data:
+  caddy_data:
+  caddy_config:

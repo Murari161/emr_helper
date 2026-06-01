@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# uv lockfile is kept in repo — pin reproducible builds.
+# (uncomment to ignore instead) # uv.lock
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Data — source manuals and extracted images are NOT committed.
+data/knowledge_base/*
+!data/knowledge_base/.gitkeep
+data/images/*
+!data/images/.gitkeep
+
+# Chainlit runtime files
+.chainlit/translations/
+.files/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Docker volumes (if ever bind-mounted instead of named)
+pgdata/
+ollama_data/
+caddy_data/
+caddy_config/
