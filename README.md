@@ -4,26 +4,26 @@ A standalone documentation chatbot for the **Ministry of Health Electronic Medic
 
 > **Status:** Phase 1 scaffold. The full README, deployment guide, and troubleshooting reference land in Phase 7.
 
-## Quick start (Docker)
+## Quick start
+
+For full step-by-step instructions — including how to generate the Chainlit auth secret, set the Caddy basic-auth password, troubleshoot common errors, and operate the running stack — see **[SETUP.md](SETUP.md)**.
+
+The short version, once you've installed Docker:
 
 ```bash
-# 1. Copy environment template
-cp .env.example .env
-# Then edit .env to set CHAINLIT_AUTH_SECRET (any long random string).
-
-# 2. Bring everything up
-docker compose up -d
-
-# 3. Pull the Ollama models (first time only, ~6 GB)
-docker compose exec ollama ollama pull bge-m3 llama3.2:3b bge-reranker-v2-m3
-
-# 4. Open in a browser
-#    http://localhost:8000   (basic-auth user: admin / password: see caddy/Caddyfile)
+git clone https://github.com/Murari161/emr_helper.git
+cd emr_helper
+cp .env.example .env                                       # then edit .env: set CHAINLIT_AUTH_SECRET
+docker run --rm caddy:2-alpine caddy hash-password \
+    --plaintext "yourpassword"                              # paste hash into caddy/Caddyfile
+docker compose up -d --build                                # ~5–15 min on first run
+# Open http://localhost:8000  (basic-auth: admin / yourpassword)
 ```
 
 The ingestion step (Phase 3 onwards) will be:
 
 ```bash
+docker compose exec ollama ollama pull bge-m3 llama3.2:3b bge-reranker-v2-m3
 docker compose exec app python -m scripts.ingest /data/knowledge_base/
 ```
 
