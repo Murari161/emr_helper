@@ -16,11 +16,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 WORKDIR /app
 
 # Install dependencies first (better layer caching).
-COPY pyproject.toml ./
+# README.md and the app/ package directory are needed because pyproject.toml
+# declares `readme = "README.md"` and `packages = ["app"]`; hatchling reads
+# both at build time even for an editable install.
+COPY pyproject.toml README.md ./
+COPY app ./app
 RUN uv venv /opt/venv \
     && uv pip install --python /opt/venv/bin/python -e .
 
-# Copy the rest of the project.
+# Copy the rest of the project (compose file, scripts, tests, Caddyfile, etc.).
 COPY . .
 
 # ---------- Stage 2: runtime ----------
