@@ -8,12 +8,14 @@ license = { text = "MIT" }
 authors = [{ name = "EMR Helper team" }]
 
 dependencies = [
-    # Chat surface
-    "chainlit>=1.3,<2.0",
+    # Chat surface. Chainlit pulls in its own pinned uvicorn transitively;
+    # we deliberately do NOT pin uvicorn ourselves to avoid resolver conflicts
+    # whenever Chainlit updates its uvicorn range.
+    "chainlit>=2.0,<3.0",
 
-    # Web / async runtime
+    # Web framework. Chainlit embeds FastAPI internally, but we depend on it
+    # directly so we can mount our own endpoints if needed (health, metrics).
     "fastapi>=0.115,<1.0",
-    "uvicorn[standard]>=0.32,<1.0",
     "python-multipart>=0.0.12",
 
     # Config and validation
