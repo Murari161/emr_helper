@@ -56,7 +56,7 @@ CHAINLIT_AUTH_SECRET=
 
 ## 3. Generate a Caddy basic-auth password
 
-The reverse proxy (Caddy) protects the app with basic authentication. You decide the password; Caddy stores its bcrypt hash.
+The reverse proxy (Caddy) protects the app with basic authentication. You decide the password; Caddy stores its bcrypt hash. **The hash lives in `.env`, never in `Caddyfile`** — so it's never committed.
 
 ### Step 3a — Hash a password you'll remember
 
@@ -74,19 +74,27 @@ $2a$14$EXxLgQ7Ld5LZ4tRzJq.eXuVxYwL9oP6rT8mN3nB2sFhGcDmK9pQwK
 
 Copy the whole `$2a$14$...` string.
 
-### Step 3b — Paste the hash into `caddy/Caddyfile`
+### Step 3b — Paste the hash into `.env`
 
-Open `caddy/Caddyfile`. Find this line:
+Open `.env`. Find this line:
 
 ```
-admin $2a$14$placeholderplaceholderplaceholderplaceholderplaceholderplaceholderx
+BASIC_AUTH_HASH=
 ```
 
-Replace the placeholder hash with the real one you just generated. Save.
+Paste the hash after the `=` (no quotes, no spaces):
 
-> **The plaintext (`demo123`) is what you type in the browser.** The hash is what Caddy stores. Don't commit the plaintext anywhere — only the hash should ever be in the file.
+```
+BASIC_AUTH_HASH=$2a$14$EXxLgQ7Ld5LZ4tRzJq.eXuVxYwL9oP6rT8mN3nB2sFhGcDmK9pQwK
+```
 
-> **To add more users later** (e.g. nurses, doctors): generate a hash for each one and add a line per user inside the `basic_auth { ... }` block. To remove someone: delete their line, restart Caddy.
+Save the file. Caddy reads this at startup and substitutes it into the Caddyfile's `{$BASIC_AUTH_HASH}` placeholder.
+
+> **The plaintext (`demo123`) is what you type in the browser.** The hash is what Caddy stores. Both should stay out of git: `.env` is already in `.gitignore`.
+
+> **To add more users later** (e.g. nurses, doctors): the cleanest approach for v1 is to support multiple users via additional env vars (`BASIC_AUTH_HASH_NURSE`, etc.) and add a line per user in `caddy/Caddyfile`. The longer-term path is OIDC against the hospital's Active Directory — Phase 7+ work.
+
+> **To rotate the password**: regenerate the hash (step 3a), replace the value in `.env`, then `docker compose restart caddy`. No git commit required.
 
 ---
 
@@ -214,7 +222,7 @@ docker compose restart caddy
 ```
 
 ### Browser keeps asking for the password — nothing accepts
-The bcrypt hash in `caddy/Caddyfile` is still the placeholder, or you mistyped the plaintext. Re-do [step 3](#3-generate-a-caddy-basic-auth-password) carefully.
+`BASIC_AUTH_HASH` is empty in `.env`, malformed, or doesn't match the password you're typing. Verify the hash starts with `$2a$14$`, has no surrounding quotes in `.env`, and was generated from the exact password you're entering. Re-do [step 3](#3-generate-a-caddy-basic-auth-password) and restart Caddy with `docker compose restart caddy`.
 
 ### Build fails: `Readme file does not exist: README.md`
 You modified the `Dockerfile` and broke the COPY order. The build needs `README.md` and `app/` present *before* the `uv pip install -e .` step runs. Restore the original Dockerfile from git: `git checkout Dockerfile`.

@@ -13,11 +13,12 @@
 	@health path /healthz
 	respond @health "ok" 200
 
-	# Everything else requires basic auth.
+	# Everything else requires basic auth. The hash is supplied via the
+	# BASIC_AUTH_HASH environment variable (read from .env at startup),
+	# so the bcrypt hash is never committed to git. See SETUP.md step 3.
 	basic_auth {
-		# username   bcrypt-hash
-		# Placeholder hash for 'change-me' — REGENERATE before any real deployment.
-		admin $2a$14$placeholderplaceholderplaceholderplaceholderplaceholderplaceholderx
+		# Format:  <username>  <bcrypt-hash from env>
+		admin {$BASIC_AUTH_HASH}
 	}
 
 	# Pass the authenticated user to the app.

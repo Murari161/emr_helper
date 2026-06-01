@@ -15,6 +15,7 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    env_file: .env   # supplies BASIC_AUTH_HASH (referenced as {$BASIC_AUTH_HASH} in Caddyfile)
     ports:
       - "8000:8000"   # change to "80:80" + "443:443" once you have a real hostname
     volumes:
