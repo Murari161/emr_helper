@@ -21,9 +21,14 @@ class Settings(BaseSettings):
     )
 
     # Database
+    # We deliberately read from APP_DATABASE_URL (not DATABASE_URL) so that
+    # Chainlit's auto-data-layer detection — which scans for the env var
+    # `DATABASE_URL` at chainlit-CLI startup — does NOT pick up our DSN and
+    # try to use its own (incompatible) Thread/User table schema.
     database_url: str = Field(
         default="postgresql://emr:emr@db:5432/emr_helper",
-        description="asyncpg-compatible Postgres DSN.",
+        validation_alias="APP_DATABASE_URL",
+        description="asyncpg-compatible Postgres DSN (env: APP_DATABASE_URL).",
     )
 
     # Ollama

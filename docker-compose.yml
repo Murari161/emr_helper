@@ -34,7 +34,12 @@ services:
     env_file: .env
     environment:
       # Override .env values that should always reflect docker-compose topology.
-      DATABASE_URL: postgresql://emr:emr@db:5432/emr_helper
+      # APP_DATABASE_URL (not DATABASE_URL!) so Chainlit's auto-detect data
+      # layer doesn't grab our DSN — Chainlit only looks for `DATABASE_URL`.
+      # We also force DATABASE_URL to empty in case the .env file has it
+      # left over from earlier setups: `environment:` overrides `env_file:`.
+      DATABASE_URL: ""
+      APP_DATABASE_URL: postgresql://emr:emr@db:5432/emr_helper
       OLLAMA_BASE_URL: http://ollama:11434
       DATA_DIR: /data
     volumes:
@@ -47,6 +52,10 @@ services:
       - ./app:/app/app
       - ./scripts:/app/scripts
       - ./tests:/app/tests
+      # Persist the HuggingFace model cache across container recreations,
+      # so the cross-encoder (BAAI/bge-reranker-v2-m3, ~600 MB) is downloaded
+      # exactly once instead of every time we `docker compose up --force-recreate`.
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       db:
         condition: service_healthy
@@ -94,3 +103,4 @@ volumes:
   ollama_data:
   caddy_data:
   caddy_config:
+  hf_cache:

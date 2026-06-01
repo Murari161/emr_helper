@@ -48,6 +48,21 @@ def _get_model() -> Any:
     return _model
 
 
+def warmup() -> None:
+    """Eagerly load the cross-encoder so the first user query doesn't pay
+    the model-load latency. Safe to call multiple times (singleton check).
+
+    Called from app/main.py at process startup. If the model is being
+    downloaded for the first time (cache empty) this can take minutes; the
+    docker-compose `hf_cache` named volume keeps the download persistent so
+    subsequent container starts are instant.
+    """
+    try:
+        _get_model()
+    except Exception:
+        log.exception("Reranker warmup failed; will retry lazily on first query")
+
+
 def _chunk_text_for_scoring(chunk: dict[str, Any]) -> str:
     """Build the text we hand to the cross-encoder as the 'document' side.
 

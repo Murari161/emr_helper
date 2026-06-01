@@ -249,6 +249,11 @@ async def get_chunks_by_ids(chunk_ids: list[UUID]) -> list[dict[str, Any]]:
 
     Postgres returns rows in arbitrary order for ANY($1), so we re-order
     on the Python side. Empty input returns empty list.
+
+    NOTE: asyncpg returns `jsonb` columns as raw JSON strings by default
+    (not parsed). We decode `images` here so downstream code can treat it
+    as a list of dicts. If we ever add more jsonb columns to chunks, decode
+    them here too.
     """
     if not chunk_ids:
         return []
@@ -264,8 +269,21 @@ async def get_chunks_by_ids(chunk_ids: list[UUID]) -> list[dict[str, Any]]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(sql, chunk_ids)
 
-    # Build a lookup so we can preserve caller's order.
-    by_id = {r["id"]: dict(r) for r in rows}
+    by_id: dict[UUID, dict[str, Any]] = {}
+    for r in rows:
+        d = dict(r)
+        # asyncpg returns jsonb as a raw JSON str -- parse so callers can
+        # iterate `images` as a list of dicts and read img["path"], etc.
+        images = d.get("images")
+        if isinstance(images, str):
+            try:
+                d["images"] = json.loads(images)
+            except json.JSONDecodeError:
+                d["images"] = []
+        elif images is None:
+            d["images"] = []
+        by_id[r["id"]] = d
+
     return [by_id[cid] for cid in chunk_ids if cid in by_id]
 
 
@@ -273,12 +291,21 @@ async def get_chunks_by_ids(chunk_ids: list[UUID]) -> list[dict[str, Any]]:
 # Chat persistence (Phase 5)
 # ---------------------------------------------------------------------------
 
-async def get_or_create_conversation(user_id: str) -> UUID:
-    """Return an open conversation id for the user, creating one if none active.
+async def create_conversation(user_id: str) -> UUID:
+    """Create a fresh conversation row and return its id.
 
-    Phase 5 will implement.
+    For now every browser session gets a new conversation (Chainlit's
+    @cl.on_chat_start fires it). A later phase can implement "resume the
+    most recent conversation within N minutes" if users want continuity.
     """
-    raise NotImplementedError("Filled in during Phase 5 (chat surface).")
+    sql = """
+        INSERT INTO conversations (user_id)
+        VALUES ($1)
+        RETURNING id
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval(sql, user_id)
 
 
 async def record_message(
@@ -290,9 +317,26 @@ async def record_message(
 ) -> UUID:
     """Persist a user or assistant message. Returns the new message id.
 
-    Phase 5 will implement.
+    Also bumps the parent conversation's last_message_at so we can sort
+    conversations by recency in any future admin UI.
     """
-    raise NotImplementedError("Filled in during Phase 5 (chat surface).")
+    chunk_ids_json = json.dumps([str(cid) for cid in (retrieved_chunk_ids or [])])
+    sql = """
+        WITH new_msg AS (
+            INSERT INTO messages (conversation_id, role, content, retrieved_chunk_ids)
+            VALUES ($1, $2, $3, $4::jsonb)
+            RETURNING id
+        ),
+        touch AS (
+            UPDATE conversations
+            SET last_message_at = now()
+            WHERE id = $1
+        )
+        SELECT id FROM new_msg
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval(sql, conversation_id, role, content, chunk_ids_json)
 
 
 async def record_feedback(
@@ -303,9 +347,16 @@ async def record_feedback(
 ) -> UUID:
     """Record a thumbs-up or thumbs-down on an assistant message.
 
-    Phase 5 will implement.
+    Multiple rows per message are allowed (latest wins in any aggregation).
     """
-    raise NotImplementedError("Filled in during Phase 5 (chat surface).")
+    sql = """
+        INSERT INTO feedback (message_id, rating, comment)
+        VALUES ($1, $2, $3)
+        RETURNING id
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval(sql, message_id, rating, comment)
 
 
 # ---------------------------------------------------------------------------
