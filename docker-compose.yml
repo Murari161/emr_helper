@@ -39,6 +39,14 @@ services:
       DATA_DIR: /data
     volumes:
       - ./data:/data
+      # Bind-mount the source so host edits show up inside the container
+      # without rebuilds. The Dockerfile's editable install (`pip install -e .`)
+      # points at /app/app, so mounting over it just changes the file content
+      # while the venv keeps working. Restart the app container to pick up
+      # changes; Chainlit also auto-reloads on .py changes.
+      - ./app:/app/app
+      - ./scripts:/app/scripts
+      - ./tests:/app/tests
     depends_on:
       db:
         condition: service_healthy

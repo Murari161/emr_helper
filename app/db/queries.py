@@ -17,8 +17,11 @@ Conventions:
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 from uuid import UUID
+
+import asyncpg
 
 from app.db.pool import get_pool
 
@@ -32,23 +35,59 @@ async def insert_document(
     title: str,
     manual_version: str,
     source_path: str,
+    conn: asyncpg.Connection | None = None,
 ) -> UUID:
-    """Insert a new document row, or return the existing id for the same
-    (title, manual_version). Used at the start of an ingest run.
+    """Insert a document row, or return the existing id for the same
+    (title, manual_version). Idempotent — safe to call on every ingest run.
 
-    Phase 3 will implement. For now, raises NotImplementedError.
+    If `conn` is provided, the query runs on that connection (so the caller
+    can wrap insert+upserts in one transaction). Otherwise the pool is used.
     """
-    raise NotImplementedError("Filled in during Phase 3 (ingestion).")
-
-
-async def mark_document_chunks_inactive(doc_id: UUID) -> int:
-    """Mark all chunks belonging to a document as `active=false`. Called at
-    the start of a re-ingest, before inserting fresh chunks for the same
-    (title, manual_version). Returns the number of rows updated.
-
-    Phase 3 will implement.
+    sql = """
+        INSERT INTO documents (title, manual_version, source_path)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (title, manual_version) DO UPDATE
+            SET source_path = EXCLUDED.source_path,
+                ingested_at = now()
+        RETURNING id
     """
-    raise NotImplementedError("Filled in during Phase 3 (ingestion).")
+
+    async def run(c: asyncpg.Connection) -> UUID:
+        return await c.fetchval(sql, title, manual_version, source_path)
+
+    if conn is not None:
+        return await run(conn)
+    pool = await get_pool()
+    async with pool.acquire() as c:
+        return await run(c)
+
+
+async def mark_document_chunks_inactive(
+    doc_id: UUID,
+    conn: asyncpg.Connection | None = None,
+) -> int:
+    """Mark every chunk belonging to a document as `active=false`. Called
+    at the start of a re-ingest before inserting fresh chunks. Returns the
+    number of rows affected.
+
+    Old chunks are *not* deleted — they may still be referenced by past
+    conversations, and historical answers must remain reconstructible.
+    """
+    sql = "UPDATE chunks SET active = false WHERE doc_id = $1 AND active = true"
+
+    async def run(c: asyncpg.Connection) -> int:
+        status = await c.execute(sql, doc_id)
+        # status format: "UPDATE <n>"
+        try:
+            return int(status.split()[-1])
+        except (ValueError, IndexError):
+            return 0
+
+    if conn is not None:
+        return await run(conn)
+    pool = await get_pool()
+    async with pool.acquire() as c:
+        return await run(c)
 
 
 # ---------------------------------------------------------------------------
@@ -72,17 +111,41 @@ async def upsert_chunk(
     page_end: int | None,
     manual_version: str,
     embedding: list[float],
+    conn: asyncpg.Connection | None = None,
 ) -> UUID:
-    """Insert a single chunk. Returns the new chunk id.
+    """Insert a single chunk row. Returns the new chunk's id.
 
-    "Upsert" is a slight misnomer: ingestion never updates a chunk in place
-    (chunk identity isn't stable across re-ingests because chunking is heuristic).
-    Re-ingest flow is "mark old inactive, insert new". This function does
-    only the INSERT half.
-
-    Phase 3 will implement.
+    "Upsert" is a slight misnomer: chunk identity is not stable across
+    re-ingests (chunking is heuristic). The re-ingest flow is "mark old
+    inactive, insert new" — this function does only the INSERT half.
     """
-    raise NotImplementedError("Filled in during Phase 3 (ingestion).")
+    sql = """
+        INSERT INTO chunks (
+            doc_id, kind, section_path, title, when_to_use, content,
+            image_captions, images, ui_labels, cautions, notes,
+            page_start, page_end, manual_version, embedding
+        )
+        VALUES (
+            $1, $2, $3, $4, $5, $6,
+            $7, $8::jsonb, $9, $10, $11,
+            $12, $13, $14, $15
+        )
+        RETURNING id
+    """
+
+    async def run(c: asyncpg.Connection) -> UUID:
+        return await c.fetchval(
+            sql,
+            doc_id, kind, section_path, title, when_to_use, content,
+            image_captions, json.dumps(images), ui_labels, cautions, notes,
+            page_start, page_end, manual_version, embedding,
+        )
+
+    if conn is not None:
+        return await run(conn)
+    pool = await get_pool()
+    async with pool.acquire() as c:
+        return await run(c)
 
 
 # ---------------------------------------------------------------------------
