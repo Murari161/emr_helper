@@ -74,7 +74,7 @@ $2a$14$EXxLgQ7Ld5LZ4tRzJq.eXuVxYwL9oP6rT8mN3nB2sFhGcDmK9pQwK
 
 Copy the whole `$2a$14$...` string.
 
-### Step 3b — Paste the hash into `.env`
+### Step 3b — Paste the hash into `.env` *(with `$` escaping — important!)*
 
 Open `.env`. Find this line:
 
@@ -82,13 +82,25 @@ Open `.env`. Find this line:
 BASIC_AUTH_HASH=
 ```
 
-Paste the hash after the `=` (no quotes, no spaces):
+Paste the hash after the `=`, **but double every `$` sign as `$$`**. This is required because docker-compose interprets `$X` inside `.env` values as a variable reference and will silently corrupt the hash.
+
+If `caddy hash-password` printed:
 
 ```
-BASIC_AUTH_HASH=$2a$14$EXxLgQ7Ld5LZ4tRzJq.eXuVxYwL9oP6rT8mN3nB2sFhGcDmK9pQwK
+$2a$14$EXxLgQ7Ld5LZ4tRzJq.eXuVxYwL9oP6rT8mN3nB2sFhGcDmK9pQwK
 ```
 
-Save the file. Caddy reads this at startup and substitutes it into the Caddyfile's `{$BASIC_AUTH_HASH}` placeholder.
+then `.env` must contain:
+
+```
+BASIC_AUTH_HASH=$$2a$$14$$EXxLgQ7Ld5LZ4tRzJq.eXuVxYwL9oP6rT8mN3nB2sFhGcDmK9pQwK
+```
+
+(every `$` doubled, no surrounding quotes, no whitespace.)
+
+Save the file. Caddy collapses each `$$` back to `$` on the way in, and substitutes the resulting hash into the Caddyfile's `{$BASIC_AUTH_HASH}` placeholder at startup.
+
+> **Symptom if you forget to escape:** Caddy starts, basic-auth prompt appears, but no password ever works — and `docker compose exec caddy env | grep BASIC_AUTH_HASH` shows a hash with chunks missing. Fix: escape, then `docker compose up -d`.
 
 > **The plaintext (`demo123`) is what you type in the browser.** The hash is what Caddy stores. Both should stay out of git: `.env` is already in `.gitignore`.
 
@@ -222,7 +234,15 @@ docker compose restart caddy
 ```
 
 ### Browser keeps asking for the password — nothing accepts
-`BASIC_AUTH_HASH` is empty in `.env`, malformed, or doesn't match the password you're typing. Verify the hash starts with `$2a$14$`, has no surrounding quotes in `.env`, and was generated from the exact password you're entering. Re-do [step 3](#3-generate-a-caddy-basic-auth-password) and restart Caddy with `docker compose restart caddy`.
+Most common cause: you pasted the bcrypt hash into `.env` without escaping the `$` signs. docker-compose treats `$X` as a variable reference and silently strips portions of the hash. Verify with:
+
+```bash
+docker compose exec caddy env | grep BASIC_AUTH_HASH
+```
+
+If the output shows a hash with missing chunks (or warnings about *"variable is not set, defaulting to a blank string"*), edit `.env` and **double every `$`** as `$$`, then `docker compose up -d`. See [step 3b](#step-3b--paste-the-hash-into-env-with--escaping--important).
+
+Other possibilities: hash starts with something other than `$2a$14$`, has surrounding quotes, or was generated for a different password than the one you're typing. Re-do [step 3](#3-generate-a-caddy-basic-auth-password) and restart with `docker compose restart caddy`.
 
 ### Build fails: `Readme file does not exist: README.md`
 You modified the `Dockerfile` and broke the COPY order. The build needs `README.md` and `app/` present *before* the `uv pip install -e .` step runs. Restore the original Dockerfile from git: `git checkout Dockerfile`.
