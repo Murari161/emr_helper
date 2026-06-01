@@ -21,8 +21,11 @@ WORKDIR /app
 # both at build time even for an editable install.
 COPY pyproject.toml README.md ./
 COPY app ./app
+# Install with [dev] extras so pytest/ruff are available inside the container.
+# The added bytes (~20 MB) are worth it: it lets us run the smoke tests with
+# `docker compose exec app pytest …` without a separate test image.
 RUN uv venv /opt/venv \
-    && uv pip install --python /opt/venv/bin/python -e .
+    && uv pip install --python /opt/venv/bin/python -e ".[dev]"
 
 # Copy the rest of the project (compose file, scripts, tests, Caddyfile, etc.).
 COPY . .
