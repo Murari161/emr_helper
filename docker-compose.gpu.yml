@@ -1,0 +1,40 @@
+# EMR Helper — GPU overlay for the Ollama service.
+#
+# Apply this overlay on machines that have an NVIDIA GPU + NVIDIA Container
+# Toolkit (Docker Desktop on Windows enables it automatically once a recent
+# NVIDIA driver is installed; on Linux you install `nvidia-container-toolkit`).
+#
+# Usage:
+#
+#   # Bring everything up with GPU
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+#   # Verify the Ollama container sees your GPU
+#   docker compose exec ollama nvidia-smi
+#
+#   # Switch back to CPU-only (for testing the production deploy config):
+#   docker compose down
+#   docker compose up -d         # ← no -f docker-compose.gpu.yml here
+#
+# Why a separate overlay file instead of editing docker-compose.yml directly:
+# the production target (hospital Linux server) does not have a GPU. Keeping
+# the GPU config in an overlay means the same docker-compose.yml that runs in
+# prod also runs on dev with one extra flag — no flipping comments before deploy.
+
+services:
+  ollama:
+    # Declare the GPU resource requirement. Docker uses the NVIDIA Container
+    # Runtime to expose the host's GPU(s) to the container. `count: all` means
+    # use every GPU; on a single-GPU laptop that's just the one.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # Useful env vars for Ollama on GPU:
+    #   OLLAMA_NUM_GPU=999       — try to put as many layers on GPU as fit
+    #   OLLAMA_FLASH_ATTENTION=1 — enables faster attention math on Ampere+/Blackwell
+    environment:
+      OLLAMA_FLASH_ATTENTION: "1"

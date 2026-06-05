@@ -182,6 +182,35 @@ This reads the manuals, chunks them by procedure heading, generates embeddings, 
 
 ## Common operations
 
+### Use the GPU (NVIDIA, dev only)
+
+If your machine has an NVIDIA GPU and the NVIDIA Container Toolkit (Docker
+Desktop on Windows enables this automatically with a recent driver), bring
+the stack up with the GPU overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
+
+That mounts your GPU into the Ollama container. Verify with:
+
+```bash
+docker compose exec ollama nvidia-smi
+```
+
+You should see your card listed. After that, model inference is dramatically
+faster — 3B models in 2–3 s, 8B models in 5–8 s.
+
+To switch back to CPU (e.g. to simulate the hospital server):
+
+```bash
+docker compose down
+docker compose up -d   # without the -f docker-compose.gpu.yml
+```
+
+The production hospital server doesn't use this overlay — `docker compose up -d`
+on its own is the canonical deploy command. The overlay file is dev-only.
+
 ### Stop the stack
 ```bash
 docker compose down
