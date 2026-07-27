@@ -199,18 +199,35 @@ _FILLER_REPLY = (
 
 
 def _chunks_referenced_by(answer: str, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return the chunks whose title (case-insensitive) appears in `answer`.
+    """Pick the chunk(s) the answer drew on, for images + the citation.
 
-    Falls back to the top-1 chunk if no titles match — there are nearly
-    always *some* images to show, and if the model paraphrased the title
-    we still want its screenshots visible.
+    Only 'procedure' chunks carry screenshots; 'index_entry' / 'glossary' /
+    'section_intro' chunks are text-only. A "How do I X?" query often ranks the
+    Quick-Index entry (same title, 0 images) above the real procedure, so we
+    must PREFER procedures here — otherwise the answer shows the steps but no
+    screenshots (and cites the index instead of the procedure).
+
+    Order of preference:
+      1. procedure chunks whose title appears in the answer,
+      2. the highest-ranked procedure chunk retrieved (model may have paraphrased),
+      3. any chunk whose title appears in the answer,
+      4. the top-ranked chunk.
     """
     if not chunks:
         return []
     answer_lower = answer.lower()
-    matched = [c for c in chunks if c.get("title") and c["title"].lower() in answer_lower]
-    if matched:
-        return matched
+    titled = [c for c in chunks if c.get("title") and c["title"].lower() in answer_lower]
+
+    proc_titled = [c for c in titled if c.get("kind") == "procedure"]
+    if proc_titled:
+        return proc_titled
+
+    procs = [c for c in chunks if c.get("kind") == "procedure"]
+    if procs:
+        return [procs[0]]
+
+    if titled:
+        return titled
     return [chunks[0]]
 
 
