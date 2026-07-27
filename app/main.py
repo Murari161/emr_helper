@@ -85,23 +85,30 @@ except Exception:  # noqa: BLE001 — never let static wiring crash app startup
 
 
 # ---------------------------------------------------------------------------
-# Header auth — Caddy passes X-User after basic auth succeeds.
+# Authentication.
+#
+# DISABLED: the Chainlit header-auth callback below made Chainlit show its own
+# /login page and call POST /auth/header from the browser. Behind Caddy basic
+# auth this loops: the browser does not attach the cached basic-auth header to
+# those background fetches, so Caddy 401s them and Chainlit bounces back to
+# /login forever (confirmed in the Caddy access logs — /auth/header without an
+# Authorization header returns 401).
+#
+# Access is already gated by Caddy basic auth (username admin) in front of the
+# whole app, so we let Chainlit run WITHOUT its own auth layer: pass the native
+# basic-auth dialog once and you are straight into the chat. Without an auth
+# callback registered, on_chat_start's `cl.user_session.get("user")` is None and
+# user_id falls back to "anonymous" (already handled below).
+#
+# To restore per-user identity later, prefer a single auth mechanism (e.g.
+# Chainlit OAuth/password auth, OR read X-User in on_chat_start) rather than
+# stacking Chainlit header-auth on top of Caddy basic-auth.
 # ---------------------------------------------------------------------------
 
-@cl.header_auth_callback
-def header_auth(headers) -> cl.User | None:
-    """Authenticate by trusting the X-User header set by Caddy.
-
-    Returns a cl.User for any non-empty header value (or 'anonymous' if
-    absent — useful in dev when accessing without the proxy). Returning
-    None would block the user from connecting; we don't want that.
-
-    Note: this is `def`, not `async def` — Chainlit calls header auth
-    synchronously during the websocket handshake.
-    """
-    # Chainlit normalises headers to lowercase keys.
-    user_id = (headers.get("x-user") or headers.get("X-User") or "anonymous").strip()
-    return cl.User(identifier=user_id, metadata={"source": "header"})
+# @cl.header_auth_callback
+# def header_auth(headers) -> cl.User | None:
+#     user_id = (headers.get("x-user") or headers.get("X-User") or "anonymous").strip()
+#     return cl.User(identifier=user_id, metadata={"source": "header"})
 
 
 # ---------------------------------------------------------------------------
