@@ -47,6 +47,44 @@ log = logging.getLogger("emr_helper")
 
 
 # ---------------------------------------------------------------------------
+# Serve manual screenshots over HTTP.
+# Images are extracted to settings.images_dir (/data/images/<slug>/fig_NN.png).
+# cl.Image elements can read local paths directly, but to embed each screenshot
+# INLINE in the answer — under its own caption, in document order — we need a
+# URL. Mount the images directory as static files at settings.images_url_prefix.
+# ---------------------------------------------------------------------------
+try:
+    from starlette.staticfiles import StaticFiles
+    from starlette.routing import Mount
+    from chainlit.server import app as _fastapi_app
+
+    if settings.images_dir.is_dir():
+        # Insert at the FRONT of the route table. Chainlit registers a catch-all
+        # route that serves its single-page app for any unmatched path, and that
+        # catch-all is already present by the time this module imports. A plain
+        # app.mount() appends AFTER it, so /images/* gets shadowed by the SPA
+        # (the browser receives HTML, not the PNG → broken image). Inserting the
+        # static mount first gives it priority over the catch-all.
+        _fastapi_app.router.routes.insert(
+            0,
+            Mount(
+                settings.images_url_prefix,
+                app=StaticFiles(directory=str(settings.images_dir)),
+                name="manual-images",
+            ),
+        )
+        log.info(
+            "Serving manual images at %s from %s (priority route)",
+            settings.images_url_prefix,
+            settings.images_dir,
+        )
+    else:
+        log.warning("Images dir %s not found; screenshots will not render", settings.images_dir)
+except Exception:  # noqa: BLE001 — never let static wiring crash app startup
+    log.exception("Could not mount manual images; screenshots may not render inline")
+
+
+# ---------------------------------------------------------------------------
 # Header auth — Caddy passes X-User after basic auth succeeds.
 # ---------------------------------------------------------------------------
 
@@ -169,20 +207,31 @@ def _chunks_referenced_by(answer: str, chunks: list[dict[str, Any]]) -> list[dic
     return [chunks[0]]
 
 
-def _safe_image_path(raw: str) -> str:
-    """Image paths stored in chunks.images came from ingest-time host paths.
-    Inside the container they're at /data/images/...; that's what we render.
+def _image_url(raw: str) -> str:
+    """Convert a stored image path (…/data/images/<slug>/fig_NN.png) into the
+    URL served by the static mount (e.g. /images/<slug>/fig_NN.png)."""
+    p = str(raw).replace("\\", "/")
+    root = str(settings.images_dir).replace("\\", "/").rstrip("/")
+    prefix = settings.images_url_prefix.rstrip("/")
+    if p.startswith(root):
+        return prefix + p[len(root):]
+    # Fallback: keep the last two components (<slug>/<file>).
+    parts = [seg for seg in p.split("/") if seg]
+    if len(parts) >= 2:
+        return f"{prefix}/" + "/".join(parts[-2:])
+    return p
+
+
+def _build_figures_markdown(chunks_used: list[dict[str, Any]]) -> str:
+    """Build a Markdown block that shows each screenshot under its own caption,
+    in document order. Embedding the images as Markdown (rather than a bottom
+    gallery of unlabelled thumbnails) keeps each figure next to the caption that
+    says what it shows, so readers can map a screenshot to the step it matches.
     """
-    return raw  # In Phase 3 we already wrote to /data/images/<slug>/, so it's fine as-is.
-
-
-async def _build_image_elements(chunks_used: list[dict[str, Any]]) -> list[cl.Image]:
-    elements: list[cl.Image] = []
     seen_paths: set[str] = set()
+    items: list[tuple[int, str, str]] = []  # (order, caption, url)
     for c in chunks_used:
         images = c.get("images") or []
-        # Defensive: if some upstream code forgot to decode jsonb, fall back
-        # gracefully rather than crashing the whole message.
         if isinstance(images, str):
             try:
                 import json as _json
@@ -193,20 +242,24 @@ async def _build_image_elements(chunks_used: list[dict[str, Any]]) -> list[cl.Im
         for img in images:
             if not isinstance(img, dict):
                 continue
-            path = _safe_image_path(img.get("path", ""))
+            path = img.get("path", "")
             if not path or path in seen_paths:
                 continue
             seen_paths.add(path)
-            caption = (img.get("caption") or f"Figure {img.get('order', '?')}")[:140]
-            elements.append(
-                cl.Image(
-                    name=caption,
-                    path=path,
-                    display="inline",
-                )
-            )
-    log.info("Built %d image element(s) from %d chunk(s)", len(elements), len(chunks_used))
-    return elements
+            caption = (img.get("caption") or f"Figure {img.get('order', '?')}").strip()
+            items.append((int(img.get("order", 0) or 0), caption, _image_url(path)))
+
+    if not items:
+        return ""
+
+    items.sort(key=lambda t: t[0])  # document order
+    lines = ["\n\n---\n\n**Screenshots**\n"]
+    for _order, caption, url in items:
+        # Caption first (so it labels the figure), then the full image beneath it.
+        alt = caption.replace("]", ")").replace("[", "(")  # keep Markdown alt-text safe
+        lines.append(f"\n*{caption}*\n\n![{alt}]({url})\n")
+    log.info("Built figures markdown with %d image(s) from %d chunk(s)", len(items), len(chunks_used))
+    return "\n".join(lines)
 
 
 def _citation(top_chunk: dict[str, Any] | None) -> str | None:
@@ -216,6 +269,113 @@ def _citation(top_chunk: dict[str, Any] | None) -> str | None:
     if not sp:
         return None
     return f"\n\n— *Source: {sp}*"
+
+
+# --- Cross-reference buttons ----------------------------------------------
+# Procedures carry "See:"/"See module:" markers pointing at the canonical
+# workflow elsewhere. We surface each as a clickable button under the answer;
+# clicking it re-runs retrieval for that target and posts the linked workflow.
+_SEE_RE = re.compile(r"^\s*See(?:\s+module)?:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _reference_actions(chunks_used: list[dict[str, Any]]) -> list[cl.Action]:
+    """One 'Open: <target>' button per unique cross-reference in the used chunks."""
+    targets: list[str] = []
+    seen: set[str] = set()
+    for c in chunks_used:
+        content = c.get("content") or ""
+        for m in _SEE_RE.finditer(content):
+            tgt = m.group(1).strip().rstrip(".")
+            key = tgt.lower()
+            if tgt and key not in seen:
+                seen.add(key)
+                targets.append(tgt)
+    actions: list[cl.Action] = []
+    for tgt in targets[:6]:  # cap so we never render a wall of buttons
+        actions.append(
+            cl.Action(
+                name="open_reference",
+                payload={"query": tgt},
+                label=f"📄 Open: {tgt}",
+                tooltip=f"Show the '{tgt}' workflow from the manuals",
+            )
+        )
+    return actions
+
+
+async def _respond(query: str, conv_id: UUID | None, *, prefer_procedures: bool = False) -> None:
+    """Retrieve → stream an answer → append captioned screenshots, a citation,
+    and clickable cross-reference buttons → persist. Shared by on_message and
+    the cross-reference action callback so both behave identically.
+
+    prefer_procedures: set True for cross-reference clicks. A "See module: X"
+    click searches a broad module name, which can match the module's text-only
+    Quick Index / overview (no screenshots). Preferring procedure-kind chunks
+    makes the opened workflow land on a real procedure that carries its images.
+    """
+    # --- Retrieval (with a visible step) ---
+    chunks: list[dict[str, Any]] = []
+    async with cl.Step(name="Searching the manuals…", type="retrieval") as step:
+        try:
+            chunks = await retrieve(query, k=8 if prefer_procedures else 5)
+            if prefer_procedures:
+                procs = [c for c in chunks if c.get("kind") == "procedure"]
+                if procs:
+                    chunks = procs[:5]
+            step.output = f"Found {len(chunks)} relevant chunk(s)."
+        except Exception:
+            log.exception("Retrieval failed")
+            step.output = "Retrieval failed — see logs."
+
+    # --- Streaming generation ---
+    assistant_msg = cl.Message(content="")
+    full_answer = ""
+    try:
+        async for token in stream_answer(query, chunks):
+            full_answer += token
+            await assistant_msg.stream_token(token)
+    except Exception:
+        log.exception("Generation failed")
+        fallback = (
+            "\n\nSomething went wrong while generating an answer. "
+            "Please try again — and if it keeps happening, ask your administrator "
+            "to check the Ollama service."
+        )
+        await assistant_msg.stream_token(fallback)
+        full_answer += fallback
+
+    # --- Post-stream: captioned screenshots, citation, reference buttons ---
+    chunks_used = _chunks_referenced_by(full_answer, chunks)
+    figures_md = _build_figures_markdown(chunks_used)
+
+    answer_lower = full_answer.lower()
+    citation = ""
+    if (
+        chunks
+        and full_answer
+        and "i don't have that in the manuals" not in answer_lower
+        and "source:" not in answer_lower
+    ):
+        cite_chunk = chunks_used[0] if chunks_used else chunks[0]
+        citation = _citation(cite_chunk) or ""
+
+    full_answer = full_answer + figures_md + citation
+    assistant_msg.content = full_answer
+    assistant_msg.elements = []
+    assistant_msg.actions = _reference_actions(chunks_used)
+    await assistant_msg.update()
+
+    # --- Persist assistant turn ---
+    if conv_id is not None:
+        try:
+            await queries.record_message(
+                conversation_id=conv_id,
+                role="assistant",
+                content=full_answer,
+                retrieved_chunk_ids=[c["id"] for c in chunks],
+            )
+        except Exception:
+            log.exception("Failed to persist assistant message")
 
 
 @cl.on_message
@@ -250,67 +410,23 @@ async def on_message(message: cl.Message) -> None:
         )
         return
 
-    # --- Retrieval (with a visible step) ----------------------------------
-    chunks: list[dict[str, Any]] = []
-    async with cl.Step(name="Searching the manuals…", type="retrieval") as step:
+    await _respond(user_query, conv_id)
+
+
+@cl.action_callback("open_reference")
+async def on_open_reference(action: cl.Action) -> None:
+    """A cross-reference button was clicked: re-run retrieval for the referenced
+    workflow and post it as a fresh answer (with its own screenshots/buttons)."""
+    query = ((action.payload or {}).get("query") or "").strip()
+    if not query:
+        return
+    conv_id: UUID | None = cl.user_session.get("conversation_id")
+    if conv_id is not None:
         try:
-            chunks = await retrieve(user_query, k=5)
-            step.output = f"Found {len(chunks)} relevant chunk(s)."
+            await queries.record_message(
+                conversation_id=conv_id, role="user", content=f"(opened reference) {query}",
+            )
         except Exception:
-            log.exception("Retrieval failed")
-            step.output = "Retrieval failed — see logs."
-
-    # --- Streaming generation ---------------------------------------------
-    assistant_msg = cl.Message(content="")
-    full_answer = ""
-    try:
-        async for token in stream_answer(user_query, chunks):
-            full_answer += token
-            await assistant_msg.stream_token(token)
-    except Exception:
-        log.exception("Generation failed")
-        fallback = (
-            "\n\nSomething went wrong while generating an answer. "
-            "Please try again — and if it keeps happening, ask your administrator "
-            "to check the Ollama service."
-        )
-        await assistant_msg.stream_token(fallback)
-        full_answer += fallback
-
-    # --- Post-stream enrichments: images, citation -----------------------
-    chunks_used = _chunks_referenced_by(full_answer, chunks)
-    image_elements = await _build_image_elements(chunks_used)
-    if image_elements:
-        assistant_msg.elements = image_elements
-
-    # Append a citation only if (a) we have chunks, (b) the answer wasn't a
-    # refusal, AND (c) the LLM didn't already include one. System prompt now
-    # instructs the LLM NOT to add a citation, but we double-check defensively.
-    answer_lower = full_answer.lower()
-    if (
-        chunks
-        and full_answer
-        and "i don't have that in the manuals" not in answer_lower
-        and "source:" not in answer_lower
-    ):
-        # Cite the first chunk the answer actually referenced (chunks_used[0])
-        # rather than chunks[0]; chunks_used falls back to chunks[0] anyway
-        # when no titles matched, so this is always safe.
-        cite_chunk = chunks_used[0] if chunks_used else chunks[0]
-        citation = _citation(cite_chunk)
-        if citation:
-            await assistant_msg.stream_token(citation)
-            full_answer += citation
-
-    await assistant_msg.update()
-
-    # --- Persist assistant turn ------------------------------------------
-    try:
-        await queries.record_message(
-            conversation_id=conv_id,
-            role="assistant",
-            content=full_answer,
-            retrieved_chunk_ids=[c["id"] for c in chunks],
-        )
-    except Exception:
-        log.exception("Failed to persist assistant message")
+            log.exception("Failed to persist reference-click turn")
+    await cl.Message(content=f"📄 Opening **{query}**…").send()
+    await _respond(query, conv_id, prefer_procedures=True)

@@ -30,6 +30,10 @@ default_theme = "light"
 # Custom CSS to enlarge the MoH coat-of-arms logo in the header.
 # Served by Chainlit's static handler from the project's public/ folder.
 custom_css = "/public/style.css"
+# Custom JS: tags the cross-reference "Open: …" action buttons with a class
+# (.emr-cta) by their visible text, so the CSS can style them reliably
+# regardless of Chainlit's internal button class names.
+custom_js = "/public/script.js"
 # CTA shown on the welcome screen above the suggested-question buttons.
 cot = "tool_call"
 

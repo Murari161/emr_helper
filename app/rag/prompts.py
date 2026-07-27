@@ -115,5 +115,6 @@ def build_user_prompt(query: str, chunks: list[dict[str, Any]]) -> str:
         "============================================================\n"
         f"USER QUESTION: {query}\n\n"
         "Answer using only the CONTEXT above, following the rules in the system message. "
-        "Remember: end with a citation line using the section_path of the chunk you drew from."
+        "Do NOT write a 'Source:', 'Section:' or 'Section_path:' line — the application adds "
+        "the citation itself. Just give the answer."
     )
