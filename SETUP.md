@@ -176,6 +176,15 @@ Drop a `.docx` file into `data/knowledge_base/` on your host machine. Then:
 docker compose exec app python -m scripts.ingest /data/knowledge_base/
 ```
 
+> **Windows / Git Bash note:** the `/data/knowledge_base/` path is the path **inside the container**. Git Bash (MINGW) rewrites arguments that start with `/` into a Windows path, so the command above fails with `Path does not exist: C:/.../data/knowledge_base`. Fix it either way:
+> - prefix the command with `MSYS_NO_PATHCONV=1`:
+>   ```bash
+>   MSYS_NO_PATHCONV=1 docker compose exec app python -m scripts.ingest /data/knowledge_base/
+>   ```
+> - **or** run it from **PowerShell / CMD** (no path rewriting there).
+>
+> The same applies to any `docker compose exec` command that takes a container path starting with `/` (e.g. `... exec app ls /data/knowledge_base/`).
+
 This reads the manuals, chunks them by procedure heading, generates embeddings, and writes them into Postgres. The script is idempotent — re-running it on the same manual won't duplicate chunks.
 
 ---

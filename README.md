@@ -27,6 +27,8 @@ docker compose exec ollama ollama pull bge-m3 llama3.2:3b bge-reranker-v2-m3
 docker compose exec app python -m scripts.ingest /data/knowledge_base/
 ```
 
+> **Windows / Git Bash note:** `/data/knowledge_base/` is the path **inside the container**. Git Bash (MINGW) rewrites leading-`/` arguments into a Windows path, so ingest fails with `Path does not exist: C:/.../data/knowledge_base`. Either prefix with `MSYS_NO_PATHCONV=1` (e.g. `MSYS_NO_PATHCONV=1 docker compose exec app python -m scripts.ingest /data/knowledge_base/`) or run the command from **PowerShell / CMD**. See `SETUP.md` for details.
+
 ## Architecture overview
 
 ```
