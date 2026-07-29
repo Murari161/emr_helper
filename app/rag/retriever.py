@@ -122,12 +122,19 @@ async def retrieve(
     if not query.strip():
         return []
 
+    import time  # perf profiling (perf/latency-profiling branch)
+    _t0 = time.perf_counter()
+    _timings: dict[str, float] = {}
+
     log.info("retrieve(%r, k=%d)", query, k)
 
     # 1. Embed query
+    _t = time.perf_counter()
     qvec = await _embed_query(query)
+    _timings["1_embed_query"] = time.perf_counter() - _t
 
     # 2. Three parallel searches
+    _t = time.perf_counter()
     ranked = await queries.hybrid_search(
         query_text=query,
         query_vec=qvec,
@@ -136,28 +143,38 @@ async def retrieve(
         k_bm25=K_BM25,
         k_trigram=K_TRIGRAM,
     )
+    _timings["2_hybrid_search"] = time.perf_counter() - _t
     log.debug(
         "  candidates: %d vector / %d bm25 / %d trigram",
         len(ranked["vector"]), len(ranked["bm25"]), len(ranked["trigram"]),
     )
 
     # 3. RRF fusion -> top-K_TO_RERANK
+    _t = time.perf_counter()
     fused = _rrf_fuse(ranked)
+    _timings["3_rrf_fuse"] = time.perf_counter() - _t
     if not fused:
         log.info("  no candidates after fusion")
         return []
     top_ids = [doc_id for doc_id, _score in fused[:K_TO_RERANK]]
 
     # 4. Hydrate the rows
+    _t = time.perf_counter()
     chunks = await queries.get_chunks_by_ids(top_ids)
+    _timings["4_hydrate_rows"] = time.perf_counter() - _t
     if not chunks:
         return []
 
-    # 5. Rerank (pass-through in v1)
+    # 5. Rerank (cross-encoder)
+    _t = time.perf_counter()
     chunks = await reranker.rerank(query, chunks)
+    _timings["5_rerank"] = time.perf_counter() - _t
 
     # 6. Top-k
     out = chunks[:k]
+    _total = time.perf_counter() - _t0
+    _breakdown = "  ".join(f"{name}={secs:.2f}s" for name, secs in _timings.items())
+    log.info("  ⏱ retrieve TOTAL=%.2fs  [%s]", _total, _breakdown)
     log.info(
         "  returned %d chunk(s), top-1 title=%r",
         len(out),

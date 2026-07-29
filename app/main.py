@@ -337,8 +337,12 @@ async def _respond(query: str, conv_id: UUID | None, *, prefer_procedures: bool 
     Quick Index / overview (no screenshots). Preferring procedure-kind chunks
     makes the opened workflow land on a real procedure that carries its images.
     """
+    import time  # perf profiling (perf/latency-profiling branch)
+    _t_req = time.perf_counter()
+
     # --- Retrieval (with a visible step) ---
     chunks: list[dict[str, Any]] = []
+    _t = time.perf_counter()
     async with cl.Step(name="Searching the manuals…", type="retrieval") as step:
         try:
             chunks = await retrieve(query, k=8 if prefer_procedures else 5)
@@ -350,12 +354,17 @@ async def _respond(query: str, conv_id: UUID | None, *, prefer_procedures: bool 
         except Exception:
             log.exception("Retrieval failed")
             step.output = "Retrieval failed — see logs."
+    _retrieval_s = time.perf_counter() - _t
 
     # --- Streaming generation ---
     assistant_msg = cl.Message(content="")
     full_answer = ""
+    _t = time.perf_counter()
+    _first_token_s: float | None = None
     try:
         async for token in stream_answer(query, chunks):
+            if _first_token_s is None:
+                _first_token_s = time.perf_counter() - _t
             full_answer += token
             await assistant_msg.stream_token(token)
     except Exception:
@@ -367,8 +376,10 @@ async def _respond(query: str, conv_id: UUID | None, *, prefer_procedures: bool 
         )
         await assistant_msg.stream_token(fallback)
         full_answer += fallback
+    _generation_s = time.perf_counter() - _t
 
     # --- Post-stream: captioned screenshots, citation, reference buttons ---
+    _t = time.perf_counter()
     chunks_used = _chunks_referenced_by(full_answer, chunks)
     figures_md = _build_figures_markdown(chunks_used)
 
@@ -388,6 +399,14 @@ async def _respond(query: str, conv_id: UUID | None, *, prefer_procedures: bool 
     assistant_msg.elements = []
     assistant_msg.actions = _reference_actions(chunks_used)
     await assistant_msg.update()
+    _postprocess_s = time.perf_counter() - _t
+
+    # --- Timing summary (perf/latency-profiling branch) ---
+    _total_s = time.perf_counter() - _t_req
+    log.info(
+        "⏱ REQUEST TOTAL=%.2fs | retrieval=%.2fs | gen_first_token=%.2fs | gen_total=%.2fs | postprocess=%.2fs | query=%r",
+        _total_s, _retrieval_s, (_first_token_s or 0.0), _generation_s, _postprocess_s, query[:60],
+    )
 
     # --- Persist assistant turn ---
     if conv_id is not None:
