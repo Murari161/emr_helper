@@ -26,6 +26,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.config import settings
+
 log = logging.getLogger(__name__)
 
 # Lazy singleton — initialized on first rerank() call.
@@ -57,6 +59,9 @@ def warmup() -> None:
     docker-compose `hf_cache` named volume keeps the download persistent so
     subsequent container starts are instant.
     """
+    if not settings.reranker_enabled:
+        log.info("Reranker DISABLED (RERANKER_ENABLED=false) — skipping model load.")
+        return
     try:
         _get_model()
     except Exception:
@@ -88,6 +93,10 @@ async def rerank(query: str, chunks: list[dict[str, Any]]) -> list[dict[str, Any
     break the user's session.
     """
     if not chunks:
+        return chunks
+
+    if not settings.reranker_enabled:
+        # Skip the cross-encoder entirely — keep the RRF/fusion order.
         return chunks
 
     try:

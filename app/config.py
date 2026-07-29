@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     embedding_dim: int = Field(default=1024)
     generation_model: str = Field(default="llama3.2:3b")
     reranker_model: str = Field(default="bge-reranker-v2-m3")
+    # Cross-encoder rerank pass. Enabled by default (best ranking quality).
+    # Set env RERANKER_ENABLED=false to skip it — frees ~2GB RAM and ~13-16s
+    # per query on CPU, at a small top-1 ranking-accuracy cost. Useful on
+    # low-RAM / CPU-only deployments (e.g. an 8GB facility laptop).
+    reranker_enabled: bool = Field(default=True)
 
     # Chainlit
     chainlit_auth_secret: str = Field(default="")
