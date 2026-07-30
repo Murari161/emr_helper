@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(default="http://ollama:11434")
     embedding_model: str = Field(default="bge-m3")
     embedding_dim: int = Field(default=1024)
+    # llama3.2:3b chosen as the default via an A/B against qwen2.5:3b and
+    # llama3.2:1b: it produces the cleanest numbered steps with bolded UI labels
+    # and stays faithful to the source, at the same speed as qwen (~2x the 1B's
+    # size but the 1B dropped numbered-list structure on complex procedures).
+    # Override per deployment with env GENERATION_MODEL.
     generation_model: str = Field(default="llama3.2:3b")
     reranker_model: str = Field(default="bge-reranker-v2-m3")
     # Cross-encoder rerank pass. Enabled by default (best ranking quality).
