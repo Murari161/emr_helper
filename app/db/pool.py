@@ -44,7 +44,7 @@ async def get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
         log.info("Creating asyncpg pool for %s", _redacted_dsn(settings.database_url))
-        _pool = await asyncpg.create_pool(
+        pool = await asyncpg.create_pool(
             dsn=settings.database_url,
             min_size=1,
             max_size=10,
@@ -52,7 +52,50 @@ async def get_pool() -> asyncpg.Pool:
             init=_init_connection,
         )
         log.info("asyncpg pool ready (size 1..10)")
+        # Migrate before publishing the pool, so no caller can reach a table
+        # that is still missing a column.
+        try:
+            await _apply_migrations(pool)
+        except Exception:
+            log.exception("Schema migration failed; continuing with the existing schema")
+        _pool = pool
     return _pool
+
+
+# schema.sql only runs on a brand-new data directory, so anything added to it
+# after a deployment was first started must also be applied here. Every
+# statement is idempotent; keep them identical to their schema.sql twins.
+_MIGRATIONS = (
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS outcome text",
+    """
+    CREATE OR REPLACE VIEW question_log AS
+    SELECT a.created_at  AS asked_at,
+           c.user_id,
+           q.content     AS question,
+           a.outcome,
+           a.content     AS answer
+    FROM messages a
+    JOIN conversations c ON c.id = a.conversation_id
+    LEFT JOIN LATERAL (
+        SELECT u.content
+        FROM messages u
+        WHERE u.conversation_id = a.conversation_id
+          AND u.role = 'user'
+          AND u.created_at <= a.created_at
+        ORDER BY u.created_at DESC
+        LIMIT 1
+    ) q ON true
+    WHERE a.role = 'assistant'
+    """,
+)
+
+
+async def _apply_migrations(pool: asyncpg.Pool) -> None:
+    """Bring an existing database up to the current schema.sql."""
+    async with pool.acquire() as conn:
+        for statement in _MIGRATIONS:
+            await conn.execute(statement)
+    log.info("Schema migrations applied (%d statement(s))", len(_MIGRATIONS))
 
 
 async def close_pool() -> None:

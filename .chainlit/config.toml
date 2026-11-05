@@ -23,8 +23,8 @@ latex = false
   enabled = false
 
 [UI]
-name = "EMR Helper"
-description = "Documentation assistant for the Ministry of Health Uganda EMR system. Ask how to do any task and get the steps + screenshots from the official user manuals. Does not access patient data and does not give clinical advice."
+name = "eAFYA Assistant"
+description = "Documentation assistant for eAFYA, the Ministry of Health Uganda EMR system. Ask how to do any task and get the steps + screenshots from the official user manuals. Does not access patient data and does not give clinical advice."
 default_collapse_content = true
 default_theme = "light"
 # Custom CSS to enlarge the MoH coat-of-arms logo in the header.

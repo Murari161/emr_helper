@@ -48,6 +48,16 @@ class Settings(BaseSettings):
     # low-RAM / CPU-only deployments (e.g. an 8GB facility laptop).
     reranker_enabled: bool = Field(default=True)
 
+    # Retrieval match strength. A question is answered from the manuals only
+    # if its best match clears ONE of these; otherwise it gets a fixed
+    # "not covered / off-topic" reply (see app/rag/fallback.py). Calibrated on
+    # the 40-prompt test sheet: answerable questions scored >= 0.62 on the
+    # vector lane or matched a title on BM25 (>= 1.0); undocumented and
+    # off-topic ones mostly scored < 0.60 with no lexical hit. The few that
+    # still pass reach the generation model, whose prompt has the same rules.
+    match_strong_vector: float = Field(default=0.60)   # bge-m3 cosine similarity
+    match_strong_bm25: float = Field(default=0.75)     # ts_rank_cd, title-weighted
+
     # Chainlit
     chainlit_auth_secret: str = Field(default="")
 

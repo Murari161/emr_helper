@@ -22,6 +22,7 @@ from typing import Any, AsyncIterator
 import httpx
 
 from app.config import settings
+from app.rag.fallback import NOT_COVERED_REPLY
 from app.rag.prompts import ANSWER_SYSTEM_PROMPT, build_user_prompt
 
 log = logging.getLogger(__name__)
@@ -39,16 +40,12 @@ async def stream_answer(
     want it to reproduce the manual's steps faithfully, not paraphrase
     creatively. Raising this hurts factual accuracy on this corpus.
 
-    If there are no chunks (retrieval came back empty), we yield a fixed
-    "I don't have that in the manuals" message without calling the LLM.
+    If there are no chunks (retrieval came back empty), we yield the fixed
+    "not in the manuals — contact your Focal Person" message without calling
+    the LLM.
     """
     if not chunks:
-        yield (
-            "I don't have that in the manuals.\n\n"
-            "If this is a clinical question, please consult a clinician or "
-            "your clinical reference. If it's a system question, the answer "
-            "may be in a manual that hasn't been ingested yet."
-        )
+        yield NOT_COVERED_REPLY
         return
 
     user_prompt = build_user_prompt(query, chunks)

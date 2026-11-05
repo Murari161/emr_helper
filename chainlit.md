@@ -1,6 +1,6 @@
-# Welcome to **EMR Helper**
+# Welcome to the **eAFYA Assistant**
 
-Your assistant for navigating the **Ministry of Health Electronic Medical Records** system. Ask me how to do any task and I'll walk you through it — with the **exact buttons**, **screenshots**, and the **section of the manual** the answer came from.
+Your assistant for navigating **eAFYA**, the Ministry of Health Electronic Medical Records system. Ask me how to do any task and I'll walk you through it — with the **exact buttons**, **screenshots**, and the **section of the manual** the answer came from.
 
 ---
 
@@ -23,7 +23,8 @@ If you're not sure where to start, try one of the **suggested questions** at the
 |---|---|
 | Look up **patient data** | I don't connect to the EMR database. I don't know who's admitted, what their diagnosis is, or any clinical details. |
 | Give **clinical advice** | I'm a documentation assistant, not a clinician. I won't tell you what to prescribe, how to diagnose, or how to treat. Please consult a clinician or your clinical reference. |
-| Answer about **features not in the manual** | If the procedure isn't documented in a manual I've been given, I'll say so honestly rather than guess. |
+| Answer about **features not in the manual** | If the procedure isn't documented in a manual I've been given, I'll say so honestly rather than guess, and point you to your facility's **eAFYA Focal Person**. |
+| Answer **questions outside eAFYA** | I only cover how to use eAFYA, from the official user manuals. |
 
 ---
 
@@ -38,7 +39,7 @@ If you're not sure where to start, try one of the **suggested questions** at the
 
 ## A note on privacy
 
-EMR Helper does **not** read or store any patient information. The only things logged are:
+The eAFYA Assistant does **not** read or store any patient information. The only things logged are:
 - The text of your questions (so we can improve answers over time).
 - Which manual sections were used to answer.
 - Your username, hashed.

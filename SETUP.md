@@ -1,6 +1,6 @@
-# EMR Helper — Setup Guide
+# eAFYA Assistant (emr_helper) — Setup Guide
 
-This guide takes you from **Docker installed** to **EMR Helper running in your browser**. It covers every step we hit during development, including the ones that needed a manual fix the first time around.
+This guide takes you from **Docker installed** to **the eAFYA Assistant running in your browser**. It covers every step we hit during development, including the ones that needed a manual fix the first time around.
 
 For the conceptual overview (what the system does, how it works), see [`README.md`](README.md).
 
@@ -147,7 +147,7 @@ http://localhost:8000
 ```
 
 1. Basic-auth prompt appears → username `admin`, password (the plaintext from step 3a).
-2. Chainlit welcome screen loads with the **"EMR Helper is online"** message.
+2. Chainlit welcome screen loads with the **eAFYA Assistant** greeting.
 3. Type anything in the chat box — until Phase 5 is wired up, you'll get an echo response (`(echo) hello`). That confirms routing works.
 
 **That's Phase 1 verified.** Subsequent phases add the real retrieval and generation pipeline.

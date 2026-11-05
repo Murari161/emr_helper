@@ -287,6 +287,20 @@ async def get_chunks_by_ids(chunk_ids: list[UUID]) -> list[dict[str, Any]]:
     return [by_id[cid] for cid in chunk_ids if cid in by_id]
 
 
+async def list_document_titles() -> list[str]:
+    """Titles of the manuals that currently have searchable chunks, A-Z."""
+    sql = """
+        SELECT DISTINCT d.title
+        FROM documents d
+        JOIN chunks c ON c.doc_id = d.id AND c.active = true
+        ORDER BY d.title
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(sql)
+    return [r["title"] for r in rows]
+
+
 # ---------------------------------------------------------------------------
 # Chat persistence (Phase 5)
 # ---------------------------------------------------------------------------
@@ -314,17 +328,22 @@ async def record_message(
     role: str,
     content: str,
     retrieved_chunk_ids: list[UUID] | None = None,
+    outcome: str | None = None,
 ) -> UUID:
     """Persist a user or assistant message. Returns the new message id.
 
     Also bumps the parent conversation's last_message_at so we can sort
     conversations by recency in any future admin UI.
+
+    `outcome` (assistant turns only) is one of the constants in
+    app/rag/fallback.py — 'answered', 'not_in_manual', 'off_topic', ... It is
+    what makes the `question_log` view usable as a documentation-gap list.
     """
     chunk_ids_json = json.dumps([str(cid) for cid in (retrieved_chunk_ids or [])])
     sql = """
         WITH new_msg AS (
-            INSERT INTO messages (conversation_id, role, content, retrieved_chunk_ids)
-            VALUES ($1, $2, $3, $4::jsonb)
+            INSERT INTO messages (conversation_id, role, content, retrieved_chunk_ids, outcome)
+            VALUES ($1, $2, $3, $4::jsonb, $5)
             RETURNING id
         ),
         touch AS (
@@ -336,7 +355,7 @@ async def record_message(
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        return await conn.fetchval(sql, conversation_id, role, content, chunk_ids_json)
+        return await conn.fetchval(sql, conversation_id, role, content, chunk_ids_json, outcome)
 
 
 async def record_feedback(

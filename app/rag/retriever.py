@@ -34,6 +34,7 @@ recommendation and works well in practice.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
@@ -99,12 +100,44 @@ def _rrf_fuse(
     return fused
 
 
+@dataclass
+class RetrievalResult:
+    """Top-k chunks plus how strongly the best candidate matched the query.
+
+    RRF fusion throws the raw lane scores away (it only uses ranks), so the
+    chunk list alone can't tell "found the procedure" from "found the least
+    irrelevant thing". These two numbers can.
+    """
+    chunks: list[dict[str, Any]] = field(default_factory=list)
+    top_vector: float = 0.0   # best cosine similarity in the vector lane
+    top_bm25: float = 0.0     # best ts_rank_cd in the BM25 lane (0 = no lexical hit)
+
+    @property
+    def is_strong(self) -> bool:
+        """True if the manuals plausibly contain the answer."""
+        return (
+            self.top_vector >= settings.match_strong_vector
+            or self.top_bm25 >= settings.match_strong_bm25
+        )
+
+
 async def retrieve(
     query: str,
     *,
     k: int = 5,
     manual_versions: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    """Top-k chunks for a query. See retrieve_scored() for the pipeline."""
+    result = await retrieve_scored(query, k=k, manual_versions=manual_versions)
+    return result.chunks
+
+
+async def retrieve_scored(
+    query: str,
+    *,
+    k: int = 5,
+    manual_versions: list[str] | None = None,
+) -> RetrievalResult:
     """Run the full hybrid pipeline for a single user query.
 
     Steps:
@@ -120,7 +153,7 @@ async def retrieve(
     A/B testing across manual revisions.
     """
     if not query.strip():
-        return []
+        return RetrievalResult()
 
     import time  # perf profiling (perf/latency-profiling branch)
     _t0 = time.perf_counter()
@@ -155,15 +188,18 @@ async def retrieve(
     _timings["3_rrf_fuse"] = time.perf_counter() - _t
     if not fused:
         log.info("  no candidates after fusion")
-        return []
+        return RetrievalResult()
     top_ids = [doc_id for doc_id, _score in fused[:K_TO_RERANK]]
+    # Lane lists are score-descending, so [0] is each lane's best match.
+    top_vector = ranked["vector"][0][1] if ranked["vector"] else 0.0
+    top_bm25 = ranked["bm25"][0][1] if ranked["bm25"] else 0.0
 
     # 4. Hydrate the rows
     _t = time.perf_counter()
     chunks = await queries.get_chunks_by_ids(top_ids)
     _timings["4_hydrate_rows"] = time.perf_counter() - _t
     if not chunks:
-        return []
+        return RetrievalResult()
 
     # 5. Rerank (cross-encoder)
     _t = time.perf_counter()
@@ -175,9 +211,13 @@ async def retrieve(
     _total = time.perf_counter() - _t0
     _breakdown = "  ".join(f"{name}={secs:.2f}s" for name, secs in _timings.items())
     log.info("  ⏱ retrieve TOTAL=%.2fs  [%s]", _total, _breakdown)
+    result = RetrievalResult(chunks=out, top_vector=top_vector, top_bm25=top_bm25)
     log.info(
-        "  returned %d chunk(s), top-1 title=%r",
+        "  returned %d chunk(s), top-1 title=%r, match vector=%.3f bm25=%.3f strong=%s",
         len(out),
         out[0]["title"] if out else None,
+        top_vector,
+        top_bm25,
+        result.is_strong,
     )
-    return out
+    return result

@@ -145,3 +145,59 @@ Direct Service Workflows steps. Confirm no "Section_path:" line shows in answers
 retrieves with the module *name* as the query, which may land on that module's overview
 rather than the exact sibling procedure. Good enough for v1; could be sharpened later by
 passing the originating procedure title alongside the module.
+
+---
+
+## M6 — Out-of-scope handling, eAFYA Focal Person fallback, outcome log (✅ done 2026-11)
+**Status:** ✅ done (stakeholder feedback item 1)
+**Where:** new `app/rag/fallback.py` (fixed replies, outcomes) and `app/rag/classifier.py`
+(question labelling); `app/rag/retriever.py` (`RetrievalResult`,
+`retrieve_scored()`); `app/main.py` (`_respond()`, `_send_fixed_reply()`);
+`app/rag/prompts.py`; `app/db/schema.sql` + `app/db/pool.py` (`messages.outcome`,
+`question_log` view); `app/config.py` (`match_strong_vector`, `match_strong_bm25`).
+**What:**
+  1. **Match strength.** Retrieval now reports the best vector similarity and best BM25
+     score alongside the chunks. A question is "strong" if vector >= 0.60 **or**
+     BM25 >= 0.75; only strong questions reach the generation model.
+  2. **Weak questions get a fixed reply, not a generated one.** One short classification
+     call labels the question, and the reply is fixed text:
+     off-topic → "I only cover how to use eAFYA"; about eAFYA but not in the manuals (or
+     any classifier failure) → "contact your facility's **eAFYA Focal Person**";
+     clinical and patient-data questions → the existing refusals; questions about the
+     assistant → an identity blurb listing the manuals actually loaded.
+  3. **Stubs.** When the answer is one of the manuals' "not yet documented" placeholders,
+     the model's paraphrase is replaced with fixed wording that names the Focal Person
+     (the stubs themselves still say "system administrator").
+  4. **No screenshots under a decline.** Figures, the citation and cross-reference buttons
+     are attached only when the outcome is `answered`.
+  5. **Outcome log.** Every assistant turn is stored with an outcome (`answered`,
+     `not_in_manual`, `off_topic`, `clinical`, `patient_data`, `about_assistant`, `filler`,
+     `error`). The `question_log` view joins it to the question and the user.
+  6. **Rename.** The assistant now calls itself the **eAFYA Assistant** (UI name, greeting,
+     prompt, welcome page). Repository, containers and database keep the name `emr_helper`.
+**Why:** stakeholders asked that out-of-knowledge-base questions be acknowledged and routed
+to the eAFYA Focal Person, who is present in every facility. A 3B model given five loosely
+related chunks tends to improvise instead of declining, so the decision is made in code.
+**Calibration:** 63 prompts (the 40-prompt sheet plus extra undocumented and off-topic
+ones). Vector similarity separates answerable from not-answerable, but does **not**
+separate "eAFYA, undocumented" (0.48–0.59) from "off-topic" (0.31–0.52) — hence the
+classifier. Thresholds are overridable with env `MATCH_STRONG_VECTOR` / `MATCH_STRONG_BM25`.
+**Latency (CPU, measured):** the classification call costs ~4 s when it follows a normal
+answer and ~0.4 s when it follows another classification. It deliberately reuses the answer
+system prompt as its own system prompt: Ollama caches the last prompt prefix, and a
+classifier with a separate system prompt evicted that cache and delayed the NEXT real
+answer by ~10 s (first token 25.8 s vs 13–15 s). Sharing the prefix removes that penalty
+(15.8 s). A weak question therefore costs ~4 s instead of a full ~20 s generation.
+An embedding-based classifier (no model call) was tried and dropped: 28/34, with mistakes
+across the safety categories.
+**Effort:** code only. No re-clean, no re-ingest. Existing databases gain the new column
+and view automatically at app start.
+**Validation:** `docker compose exec app pytest tests/test_fallback.py -v`. In the chat:
+"What's the weather today?" → off-topic reply; "How do I integrate eAFYA with DHIS2?" →
+Focal Person reply; "How do I do a bulk dispensation?" → not-yet-documented + Focal Person;
+"what modules do you know about?" → module list. Gap list:
+`docker compose exec db psql -U emr emr_helper -c "select asked_at, user_id, question from question_log where outcome = 'not_in_manual' order by asked_at desc;"`
+**Known limits:** the classifier is tuned on the same prompts it was checked against, so
+expect some misses on real phrasing — every miss still lands on a safe reply. A weak-match
+question that the manuals do answer gets the Focal Person reply; the topic menu planned for
+vague questions (feedback item 2) is the mitigation.

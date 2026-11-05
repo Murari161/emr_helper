@@ -1,4 +1,4 @@
-"""Conversation starters shown on the EMR Helper welcome screen.
+"""Conversation starters shown on the eAFYA Assistant welcome screen.
 
 These appear as clickable suggestions when a user first opens the chat;
 clicking one sends it as if the user had typed it. Choose questions that

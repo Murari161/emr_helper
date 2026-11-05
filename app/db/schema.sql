@@ -188,11 +188,38 @@ CREATE TABLE IF NOT EXISTS messages (
     role                  text NOT NULL CHECK (role IN ('user', 'assistant')),
     content               text NOT NULL,
     retrieved_chunk_ids   jsonb NOT NULL DEFAULT '[]'::jsonb,
+    -- Assistant turns only: how the question was handled — 'answered',
+    -- 'not_in_manual', 'off_topic', 'clinical', 'patient_data',
+    -- 'about_assistant', 'filler', 'error' (see app/rag/fallback.py).
+    outcome               text,
     created_at            timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS messages_conversation
     ON messages (conversation_id, created_at);
+
+-- question_log — one row per answered turn: who asked what, and how it was
+-- handled. `WHERE outcome = 'not_in_manual'` is the documentation-gap list.
+-- Databases created before the `outcome` column existed get both the column
+-- and this view from app/db/pool.py at startup (same statements).
+CREATE OR REPLACE VIEW question_log AS
+SELECT a.created_at  AS asked_at,
+       c.user_id,
+       q.content     AS question,
+       a.outcome,
+       a.content     AS answer
+FROM messages a
+JOIN conversations c ON c.id = a.conversation_id
+LEFT JOIN LATERAL (
+    SELECT u.content
+    FROM messages u
+    WHERE u.conversation_id = a.conversation_id
+      AND u.role = 'user'
+      AND u.created_at <= a.created_at
+    ORDER BY u.created_at DESC
+    LIMIT 1
+) q ON true
+WHERE a.role = 'assistant';
 
 
 -- ---------------------------------------------------------------------------

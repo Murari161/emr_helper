@@ -1,4 +1,4 @@
-"""Chainlit entry point for EMR Helper.
+"""Chainlit entry point for the eAFYA Assistant.
 
 The Phase 5 wiring:
     on_chat_start
@@ -9,7 +9,9 @@ The Phase 5 wiring:
         - show a "Searching the manuals…" step
         - retrieve top-5 chunks
         - persist the user turn
-        - stream the LLM answer into a Chainlit message
+        - if the best match is weak, reply with a fixed "off-topic" / "contact
+          your eAFYA Focal Person" message instead of generating (fallback.py)
+        - otherwise stream the LLM answer into a Chainlit message
         - after streaming, attach images from chunks the answer actually
           drew on, append a citation footer, persist the assistant turn
 
@@ -28,9 +30,9 @@ import chainlit as cl
 
 from app.config import settings
 from app.db import queries
-from app.rag import reranker
+from app.rag import classifier, fallback, reranker
 from app.rag.generator import stream_answer
-from app.rag.retriever import retrieve
+from app.rag.retriever import RetrievalResult, retrieve_scored
 from app.ui.starters import get_starters
 
 # Eagerly load the cross-encoder at import time so the first user query
@@ -132,15 +134,16 @@ async def on_chat_start() -> None:
 
     await cl.Message(
         content=(
-            "👋 Hi! I'm **EMR Helper** — your guide to the Ministry of Health "
-            "EMR system.\n\n"
+            "👋 Hi! I'm the **eAFYA Assistant** — your guide to eAFYA, the "
+            "Ministry of Health EMR system.\n\n"
             "Ask me how to do anything from the user manuals — registering a "
             "patient, queueing them for a doctor, closing a clinic session, "
             "scheduling reminders, generating reports — and I'll walk you "
             "through the steps with the **screenshots** from the manual.\n\n"
             "ℹ️ I **don't** read patient data and I **don't** give clinical "
             "advice. For clinical questions, please consult a clinician or "
-            "your clinical reference.\n\n"
+            "your clinical reference. For anything the manuals don't cover, "
+            f"contact your facility's **{fallback.FOCAL_PERSON}**.\n\n"
             "Try one of the suggestions below, or ask anything in your own words."
         ),
     ).send()
@@ -189,8 +192,8 @@ def _is_filler_query(query: str) -> bool:
 
 
 _FILLER_REPLY = (
-    "Hello! 👋 I'm **EMR Helper** — I answer questions about how to use the "
-    "EMR system from the official user manuals.\n\n"
+    "Hello! 👋 I'm the **eAFYA Assistant** — I answer questions about how to "
+    "use eAFYA from the official user manuals.\n\n"
     "Try something specific, for example:\n"
     "- *How do I register a new patient?*\n"
     "- *How do I close a clinic session?*\n"
@@ -341,24 +344,46 @@ async def _respond(query: str, conv_id: UUID | None, *, prefer_procedures: bool 
     _t_req = time.perf_counter()
 
     # --- Retrieval (with a visible step) ---
-    chunks: list[dict[str, Any]] = []
+    result = RetrievalResult()
+    retrieval_failed = False
     _t = time.perf_counter()
     async with cl.Step(name="Searching the manuals…", type="retrieval") as step:
         try:
-            chunks = await retrieve(query, k=8 if prefer_procedures else 5)
+            result = await retrieve_scored(query, k=8 if prefer_procedures else 5)
             if prefer_procedures:
-                procs = [c for c in chunks if c.get("kind") == "procedure"]
+                procs = [c for c in result.chunks if c.get("kind") == "procedure"]
                 if procs:
-                    chunks = procs[:5]
-            step.output = f"Found {len(chunks)} relevant chunk(s)."
+                    result.chunks = procs[:5]
+            step.output = f"Found {len(result.chunks)} relevant chunk(s)."
         except Exception:
             log.exception("Retrieval failed")
+            retrieval_failed = True
             step.output = "Retrieval failed — see logs."
+    chunks = result.chunks
     _retrieval_s = time.perf_counter() - _t
+
+    if retrieval_failed:
+        await _send_fixed_reply(fallback.ERROR_REPLY, fallback.ERROR, conv_id)
+        return
+
+    # --- Weak match: don't generate, give a fixed reply ---
+    # A cross-reference click searches for a workflow the manuals themselves
+    # named, so it is always answered.
+    if not prefer_procedures and not result.is_strong:
+        _t = time.perf_counter()
+        reply, outcome = await _classified_reply(query)
+        log.info(
+            "⏱ REQUEST TOTAL=%.2fs | retrieval=%.2fs | classify=%.2fs | weak match (vector=%.3f bm25=%.3f) -> %s | query=%r",
+            time.perf_counter() - _t_req, _retrieval_s, time.perf_counter() - _t,
+            result.top_vector, result.top_bm25, outcome, query[:60],
+        )
+        await _send_fixed_reply(reply, outcome, conv_id, chunks=chunks)
+        return
 
     # --- Streaming generation ---
     assistant_msg = cl.Message(content="")
     full_answer = ""
+    generation_failed = False
     _t = time.perf_counter()
     _first_token_s: float | None = None
     try:
@@ -369,43 +394,61 @@ async def _respond(query: str, conv_id: UUID | None, *, prefer_procedures: bool 
             await assistant_msg.stream_token(token)
     except Exception:
         log.exception("Generation failed")
-        fallback = (
-            "\n\nSomething went wrong while generating an answer. "
-            "Please try again — and if it keeps happening, ask your administrator "
-            "to check the Ollama service."
-        )
-        await assistant_msg.stream_token(fallback)
-        full_answer += fallback
+        generation_failed = True
+        await assistant_msg.stream_token("\n\n" + fallback.ERROR_REPLY)
+        full_answer += "\n\n" + fallback.ERROR_REPLY
     _generation_s = time.perf_counter() - _t
 
-    # --- Post-stream: captioned screenshots, citation, reference buttons ---
+    # --- Post-stream: outcome, captioned screenshots, citation, reference buttons ---
     _t = time.perf_counter()
-    chunks_used = _chunks_referenced_by(full_answer, chunks)
-    figures_md = _build_figures_markdown(chunks_used)
+    outcome = fallback.ERROR if generation_failed else fallback.detect_outcome(full_answer)
 
-    answer_lower = full_answer.lower()
-    citation = ""
-    if (
-        chunks
-        and full_answer
-        and "i don't have that in the manuals" not in answer_lower
-        and "source:" not in answer_lower
-    ):
-        cite_chunk = chunks_used[0] if chunks_used else chunks[0]
-        citation = _citation(cite_chunk) or ""
+    # The manuals carry honest "not yet documented" placeholders. When the
+    # answer is one of those, replace the model's paraphrase with the fixed
+    # wording so the user is always sent to the Focal Person.
+    stub = None if generation_failed else fallback.cited_stub(full_answer, chunks)
+    if stub is not None:
+        full_answer = fallback.STUB_REPLY.format(title=fallback.stub_title(stub))
+        outcome = fallback.NOT_IN_MANUAL
+    elif outcome == fallback.CLINICAL:
+        full_answer = fallback.CLINICAL_REPLY
+    elif outcome == fallback.PATIENT_DATA:
+        full_answer = fallback.PATIENT_DATA_REPLY
+    elif outcome == fallback.NOT_IN_MANUAL:
+        if chunks and fallback.is_stub(chunks[0]):
+            # Best match is a placeholder and the model declined: name the
+            # feature rather than give the generic "couldn't find this".
+            full_answer = fallback.STUB_REPLY.format(title=fallback.stub_title(chunks[0]))
+        else:
+            # The model found nothing usable in a strong match. Say WHY in the
+            # same words a weak match would get: "how many patients are
+            # admitted today?" is a patient-data question, not a manual gap.
+            full_answer, outcome = await _classified_reply(query)
 
-    full_answer = full_answer + figures_md + citation
+    # Screenshots, the citation and cross-reference buttons belong to a real
+    # answer only — never under a decline or an error.
+    actions: list[cl.Action] = []
+    if outcome == fallback.ANSWERED and chunks and full_answer:
+        chunks_used = _chunks_referenced_by(full_answer, chunks)
+        figures_md = _build_figures_markdown(chunks_used)
+        citation = ""
+        if "source:" not in full_answer.lower():
+            cite_chunk = chunks_used[0] if chunks_used else chunks[0]
+            citation = _citation(cite_chunk) or ""
+        full_answer = full_answer + figures_md + citation
+        actions = _reference_actions(chunks_used)
+
     assistant_msg.content = full_answer
     assistant_msg.elements = []
-    assistant_msg.actions = _reference_actions(chunks_used)
+    assistant_msg.actions = actions
     await assistant_msg.update()
     _postprocess_s = time.perf_counter() - _t
 
     # --- Timing summary (perf/latency-profiling branch) ---
     _total_s = time.perf_counter() - _t_req
     log.info(
-        "⏱ REQUEST TOTAL=%.2fs | retrieval=%.2fs | gen_first_token=%.2fs | gen_total=%.2fs | postprocess=%.2fs | query=%r",
-        _total_s, _retrieval_s, (_first_token_s or 0.0), _generation_s, _postprocess_s, query[:60],
+        "⏱ REQUEST TOTAL=%.2fs | retrieval=%.2fs | gen_first_token=%.2fs | gen_total=%.2fs | postprocess=%.2fs | outcome=%s | query=%r",
+        _total_s, _retrieval_s, (_first_token_s or 0.0), _generation_s, _postprocess_s, outcome, query[:60],
     )
 
     # --- Persist assistant turn ---
@@ -416,9 +459,45 @@ async def _respond(query: str, conv_id: UUID | None, *, prefer_procedures: bool 
                 role="assistant",
                 content=full_answer,
                 retrieved_chunk_ids=[c["id"] for c in chunks],
+                outcome=outcome,
             )
         except Exception:
             log.exception("Failed to persist assistant message")
+
+
+async def _classified_reply(query: str) -> tuple[str, str]:
+    """Classify a question the manuals can't answer -> (fixed reply, outcome)."""
+    label = await classifier.classify_question(query)
+    modules: list[str] = []
+    if label == classifier.ASSISTANT:
+        try:
+            modules = await queries.list_document_titles()
+        except Exception:
+            log.exception("Could not list manuals for the 'about' reply")
+    return fallback.fallback_reply(label, modules)
+
+
+async def _send_fixed_reply(
+    reply: str,
+    outcome: str,
+    conv_id: UUID | None,
+    *,
+    chunks: list[dict[str, Any]] | None = None,
+) -> None:
+    """Send one of the fixed fallback.py replies and persist it with its outcome."""
+    await cl.Message(content=reply).send()
+    if conv_id is None:
+        return
+    try:
+        await queries.record_message(
+            conversation_id=conv_id,
+            role="assistant",
+            content=reply,
+            retrieved_chunk_ids=[c["id"] for c in (chunks or [])],
+            outcome=outcome,
+        )
+    except Exception:
+        log.exception("Failed to persist assistant message")
 
 
 @cl.on_message
@@ -444,13 +523,7 @@ async def on_message(message: cl.Message) -> None:
 
     # --- Short-circuit conversational filler -----------------------------
     if _is_filler_query(user_query):
-        await cl.Message(content=_FILLER_REPLY).send()
-        await queries.record_message(
-            conversation_id=conv_id,
-            role="assistant",
-            content=_FILLER_REPLY,
-            retrieved_chunk_ids=[],
-        )
+        await _send_fixed_reply(_FILLER_REPLY, fallback.FILLER, conv_id)
         return
 
     await _respond(user_query, conv_id)

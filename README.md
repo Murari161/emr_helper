@@ -1,4 +1,4 @@
-# EMR Helper
+# eAFYA Assistant (emr_helper)
 
 A standalone documentation chatbot for the **Ministry of Health Electronic Medical Records** system. It answers natural-language questions from health workers (e.g. *"How do I close a clinic session?"*) using only the official EMR user manuals — no patient data, no clinical advice.
 
