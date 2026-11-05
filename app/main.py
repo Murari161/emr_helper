@@ -12,8 +12,9 @@ The Phase 5 wiring:
         - if the best match is weak, reply with a fixed "off-topic" / "contact
           your eAFYA Focal Person" message instead of generating (fallback.py)
         - otherwise stream the LLM answer into a Chainlit message
-        - after streaming, attach images from chunks the answer actually
-          drew on, append a citation footer, persist the assistant turn
+        - after streaming, put each screenshot under the step it
+          illustrates (from the chunks the answer actually drew on), append
+          a citation footer, persist the assistant turn
 
 Header auth: Caddy validates basic-auth and forwards X-User. We treat that
 as the user identity. If the header isn't present (dev without auth, or
@@ -33,6 +34,7 @@ from app.db import queries
 from app.rag import classifier, fallback, reranker
 from app.rag.generator import stream_answer
 from app.rag.retriever import RetrievalResult, retrieve_scored
+from app.ui.figures import answer_with_figures
 from app.ui.starters import get_starters
 
 # Eagerly load the cross-encoder at import time so the first user query
@@ -234,61 +236,6 @@ def _chunks_referenced_by(answer: str, chunks: list[dict[str, Any]]) -> list[dic
     return [chunks[0]]
 
 
-def _image_url(raw: str) -> str:
-    """Convert a stored image path (…/data/images/<slug>/fig_NN.png) into the
-    URL served by the static mount (e.g. /images/<slug>/fig_NN.png)."""
-    p = str(raw).replace("\\", "/")
-    root = str(settings.images_dir).replace("\\", "/").rstrip("/")
-    prefix = settings.images_url_prefix.rstrip("/")
-    if p.startswith(root):
-        return prefix + p[len(root):]
-    # Fallback: keep the last two components (<slug>/<file>).
-    parts = [seg for seg in p.split("/") if seg]
-    if len(parts) >= 2:
-        return f"{prefix}/" + "/".join(parts[-2:])
-    return p
-
-
-def _build_figures_markdown(chunks_used: list[dict[str, Any]]) -> str:
-    """Build a Markdown block that shows each screenshot under its own caption,
-    in document order. Embedding the images as Markdown (rather than a bottom
-    gallery of unlabelled thumbnails) keeps each figure next to the caption that
-    says what it shows, so readers can map a screenshot to the step it matches.
-    """
-    seen_paths: set[str] = set()
-    items: list[tuple[int, str, str]] = []  # (order, caption, url)
-    for c in chunks_used:
-        images = c.get("images") or []
-        if isinstance(images, str):
-            try:
-                import json as _json
-                images = _json.loads(images)
-            except Exception:
-                log.warning("Chunk %s has unparseable images jsonb; skipping", c.get("id"))
-                continue
-        for img in images:
-            if not isinstance(img, dict):
-                continue
-            path = img.get("path", "")
-            if not path or path in seen_paths:
-                continue
-            seen_paths.add(path)
-            caption = (img.get("caption") or f"Figure {img.get('order', '?')}").strip()
-            items.append((int(img.get("order", 0) or 0), caption, _image_url(path)))
-
-    if not items:
-        return ""
-
-    items.sort(key=lambda t: t[0])  # document order
-    lines = ["\n\n---\n\n**Screenshots**\n"]
-    for _order, caption, url in items:
-        # Caption first (so it labels the figure), then the full image beneath it.
-        alt = caption.replace("]", ")").replace("[", "(")  # keep Markdown alt-text safe
-        lines.append(f"\n*{caption}*\n\n![{alt}]({url})\n")
-    log.info("Built figures markdown with %d image(s) from %d chunk(s)", len(items), len(chunks_used))
-    return "\n".join(lines)
-
-
 def _citation(top_chunk: dict[str, Any] | None) -> str | None:
     if not top_chunk:
         return None
@@ -430,12 +377,13 @@ async def _respond(query: str, conv_id: UUID | None, *, prefer_procedures: bool 
     actions: list[cl.Action] = []
     if outcome == fallback.ANSWERED and chunks and full_answer:
         chunks_used = _chunks_referenced_by(full_answer, chunks)
-        figures_md = _build_figures_markdown(chunks_used)
         citation = ""
         if "source:" not in full_answer.lower():
             cite_chunk = chunks_used[0] if chunks_used else chunks[0]
             citation = _citation(cite_chunk) or ""
-        full_answer = full_answer + figures_md + citation
+        # Each screenshot goes under the step it illustrates; any that can't
+        # be matched to a step are listed after the answer (app/ui/figures.py).
+        full_answer = answer_with_figures(full_answer, chunks_used) + citation
         actions = _reference_actions(chunks_used)
 
     assistant_msg.content = full_answer

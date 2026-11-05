@@ -13,7 +13,8 @@ Each procedure chunk pulls these fields out of its element range:
   notes          concatenation of "Note: ..." callout paragraphs
   cautions       concatenation of "Caution: ..." callout paragraphs
   image_captions concatenation of attached images' captions, " || " separated
-  images         JSON-able list of {path, caption, order} for the chunk's screenshots
+  images         JSON-able list of {path, caption, order, step, step_text} for the
+                 chunk's screenshots (step = the list item the image sits under)
   ui_labels      space-separated bold runs from every paragraph in the chunk
   section_path   breadcrumb like "Section 1: Patient registration > Queued Patients tab > Close a clinic session"
 """
@@ -117,9 +118,16 @@ def _build_procedure_chunk(
     section_path: str,
     body_elements: Iterable[Element],
     attached_images: list[ImageInfo],
+    image_steps: dict[int, tuple[int, str]] | None = None,
 ) -> Chunk:
     """Aggregate the body elements between this H3 and the next heading
-    into a single procedure chunk."""
+    into a single procedure chunk.
+
+    image_steps maps an image's element_index to the step it sits under in
+    the manual: (1-based step number, that step's text). An image that comes
+    before the first step is absent from the map.
+    """
+    image_steps = image_steps or {}
 
     when_to_use_text: str | None = None
     content_lines: list[str] = []
@@ -167,10 +175,20 @@ def _build_procedure_chunk(
     # image_captions: " || " separated, matches the schema doc.
     image_captions = " || ".join(img.caption for img in attached_images if img.caption)
 
-    images_json = [
-        {"path": str(img.path), "caption": img.caption, "order": img.order}
-        for img in attached_images
-    ]
+    # "step" / "step_text" record which step the screenshot sits under in the
+    # manual, so the chat can show it right after that step (0 / "" = none).
+    # step_text is what the UI matches against the generated answer, because
+    # the model may renumber or merge steps.
+    images_json = []
+    for img in attached_images:
+        step_no, step_text = image_steps.get(img.element_index, (0, ""))
+        images_json.append({
+            "path": str(img.path),
+            "caption": img.caption,
+            "order": img.order,
+            "step": step_no,
+            "step_text": step_text,
+        })
 
     return Chunk(
         kind="procedure",
@@ -327,11 +345,24 @@ def chunk_document(doc: LoadedDocument, images: list[ImageInfo]) -> list[Chunk]:
                     if k in images_by_idx
                 ]
 
+                # Which step does each image sit under? Steps are the list
+                # items of the procedure, counted in order; an image belongs
+                # to the nearest list item before it.
+                image_steps: dict[int, tuple[int, str]] = {}
+                step_no, step_text = 0, ""
+                for k in range(i + 1, j):
+                    if elements[k].kind == "list_item":
+                        step_no += 1
+                        step_text = elements[k].text
+                    elif k in images_by_idx and step_no:
+                        image_steps[k] = (step_no, step_text)
+
                 chunk = _build_procedure_chunk(
                     h3_title=h3_title,
                     section_path=section_path,
                     body_elements=window,
                     attached_images=attached,
+                    image_steps=image_steps,
                 )
                 # Procedure chunks also get image-caption text concatenated
                 # into ui_labels-adjacent searchability through image_captions.

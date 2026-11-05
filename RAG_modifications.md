@@ -201,3 +201,40 @@ Focal Person reply; "How do I do a bulk dispensation?" → not-yet-documented + 
 expect some misses on real phrasing — every miss still lands on a safe reply. A weak-match
 question that the manuals do answer gets the Focal Person reply; the topic menu planned for
 vague questions (feedback item 2) is the mitigation.
+
+---
+
+## M7 — Screenshots under the step they illustrate (✅ done 2026-11)
+**Status:** ✅ done (stakeholder feedback item 3)
+**Where:** new `app/ui/figures.py`; `app/ingestion/chunk.py`; `app/main.py`. Outside this
+repository: the 17 cleaned manuals were rebuilt (tools and mapping in the parent project's
+`scratch/figure_steps/`, see its README).
+**What:**
+  1. **Manuals.** Each screenshot now sits directly under the step it illustrates instead
+     of after the whole step list (504 of 637 images sit between steps; the rest belong to
+     the last step). Only the order changed: a comparison script confirms identical text,
+     identical images and intact image-caption pairs in all 17 manuals.
+  2. **Ingestion.** Every image in `chunks.images` now carries `step` (the list item it
+     sits under, 0 = none) and `step_text` (that item's text). The position in the .docx is
+     the single source of truth, so moving a picture in Word and re-ingesting is enough.
+  3. **Display.** `answer_with_figures()` inserts each screenshot under the matching step
+     of the generated answer. It matches on wording, not step numbers, because the model
+     may merge or renumber steps. A screenshot is placed only if at least half of its manual
+     step's distinctive words appear in an answer step; otherwise it is listed in the old
+     "Screenshots" block after the answer. Only the procedure the answer walks through is
+     interleaved — screenshots of a procedure merely mentioned stay in the trailing block.
+**Why:** stakeholders asked for "each step with its screenshot", not steps then screenshots.
+**How placements were decided:** result of an action → that action's step; where-to-click
+→ the first step that uses the screen (an annotated screenshot whose markers start at
+step 1 follows step 1); form or pop-up → the first step that fills it in. Every placement
+was checked against the image. 573 are clear-cut, 61 are close calls and 2 fit a different
+procedure better — those 63, plus 32 captions that do not describe their image, are in
+`EMR_Screenshot_Placement_Review.html` for a super user.
+**Effort:** content + code. Requires a re-ingest of all manuals.
+**Rollback:** copy `data/knowledge_base_before_figure_arrangement/*.docx` back into
+`data/knowledge_base/` and re-ingest. The display code needs no change: images without step
+data fall back to the trailing block.
+**Validation:** `docker compose exec app pytest tests/test_figures.py -v`; then ask
+"How do I dispense drugs to a patient?" and check each screenshot follows its step.
+**Known limits:** during streaming the answer is text only; screenshots slot in when the
+answer completes. An answer written without numbered steps keeps all screenshots at the end.

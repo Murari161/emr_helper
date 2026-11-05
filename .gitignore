@@ -21,6 +21,9 @@ data/knowledge_base/*
 !data/knowledge_base/.gitkeep
 data/images/*
 !data/images/.gitkeep
+# Backups of the manuals taken before a rebuild (e.g. before screenshots were
+# moved under their steps).
+data/knowledge_base_before_*/
 
 # Chainlit runtime files
 .chainlit/translations/
