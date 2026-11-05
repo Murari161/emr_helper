@@ -287,6 +287,32 @@ async def get_chunks_by_ids(chunk_ids: list[UUID]) -> list[dict[str, Any]]:
     return [by_id[cid] for cid in chunk_ids if cid in by_id]
 
 
+async def find_procedure_in_module(module_key: str, title: str) -> dict[str, Any] | None:
+    """The active procedure chunk with this exact title in the named manual.
+
+    `module_key` is the manual's title lower-cased without a trailing
+    " module" (see app/rag/canonical.py::module_key). Returns the full chunk
+    row, or None if that manual has no procedure of this title.
+    """
+    sql = """
+        SELECT c.id
+        FROM chunks c
+        JOIN documents d ON d.id = c.doc_id
+        WHERE c.active = true
+          AND c.kind = 'procedure'
+          AND lower(btrim(c.title)) = lower(btrim($2))
+          AND regexp_replace(lower(btrim(d.title)), '\\s+module$', '') = $1
+        LIMIT 1
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        chunk_id = await conn.fetchval(sql, module_key, title)
+    if chunk_id is None:
+        return None
+    rows = await get_chunks_by_ids([chunk_id])
+    return rows[0] if rows else None
+
+
 async def list_document_titles() -> list[str]:
     """Titles of the manuals that currently have searchable chunks, A-Z."""
     sql = """

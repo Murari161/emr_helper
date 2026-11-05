@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     match_strong_vector: float = Field(default=0.60)   # bge-m3 cosine similarity
     match_strong_bm25: float = Field(default=0.75)     # ts_rank_cd, title-weighted
 
+    # When a retrieved procedure is only a summary of a same-titled procedure
+    # in the manual it points to ("See module: X"), answer from the full one.
+    # Set env PREFER_FULL_PROCEDURES=false to keep the raw ranking.
+    prefer_full_procedures: bool = Field(default=True)
+
     # Chainlit
     chainlit_auth_secret: str = Field(default="")
 

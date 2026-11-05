@@ -36,6 +36,21 @@ What each test catches:
       too. Its screenshots share wording with the main steps; they must go to
       the trailing block, not under the main procedure's steps (seen live:
       "Queue a returning patient" shots landing in "Register a patient").
+
+  test_figure_of_a_dropped_step_goes_between_its_neighbours
+      The manual has a step the model skips ("Fields marked in red are
+      mandatory"). Its screenshot must not fall to the end: it sits between
+      two placed neighbours, so it goes under the step between them (seen
+      live: the registration form shot left after the answer).
+
+  test_shortened_step_still_matches
+      The model trimmed a long manual step to its first clause; the screenshot
+      still goes under it.
+
+  test_procedure_without_screenshots_says_so
+      53 procedures have no screenshot in the manuals. A step-by-step answer
+      from one of them ends with a line saying so; definitions and prose
+      answers do not.
 """
 from __future__ import annotations
 
@@ -93,7 +108,7 @@ def test_unmatched_figures_fall_back_to_the_screenshots_block() -> None:
         fig(2, 9, "Print the wristband and attach it to the patient."),   # not in the answer
         fig(3, 0, ""),                                                    # no step recorded
     ])
-    block = out[out.index("**Screenshots**"):]
+    block = out[out.index("**More screenshots**"):]      # "More": one was placed under a step
     assert "fig_02.png" in block and "fig_03.png" in block
     assert "fig_01.png" not in block
 
@@ -145,4 +160,37 @@ def test_only_the_main_procedure_is_placed_under_steps() -> None:
     for chunks in ([main, other], [other, main]):          # retrieval order must not matter
         out = answer_with_figures(answer, chunks)
         assert out.index("3. Enter") < out.index("a/fig_02.png") < out.index("4. Click")
-        assert out.index("**Screenshots**") < out.index("b/fig_09.png")
+        assert out.index("**More screenshots**") < out.index("b/fig_09.png")
+
+
+def test_figure_of_a_dropped_step_goes_between_its_neighbours() -> None:
+    out = place_figures(ANSWER, [
+        fig(1, 2, "Click the +New button in the toolbar to open the registration page."),
+        fig(2, 3, "Fields marked in red are mandatory."),                 # the model skipped this step
+        fig(3, 5, "Click the Save button at the bottom of the form to save the record."),
+    ])
+    assert "screenshots**" not in out.lower()                              # nothing left at the end
+    assert out.index("3. Enter") < out.index("fig_02.png") < out.index("4. Click")
+
+
+def test_shortened_step_still_matches() -> None:
+    manual_step = ("Enter the patient details in the form, making sure every field outlined "
+                   "in red is completed and the photo has been selected.")
+    out = place_figures(ANSWER, [fig(1, 3, manual_step)])
+    assert out.index("3. Enter") < out.index("fig_01.png") < out.index("4. Click")
+
+
+def test_procedure_without_screenshots_says_so() -> None:
+    from app.ui.figures import NO_SCREENSHOT_NOTE
+
+    procedure = {"kind": "procedure", "title": "Approve a leave request", "images": [],
+                 "content": "Click the Register Patient tab.\nClick the +New button in the toolbar."}
+    assert answer_with_figures(ANSWER, [procedure]).endswith(NO_SCREENSHOT_NOTE)
+
+    # A definition is never expected to have a screenshot: no note.
+    glossary = {"kind": "glossary", "title": "Debtor tracking account", "images": [],
+                "content": "An account that records what a client owes."}
+    prose = "A debtor tracking account records what a client owes."
+    assert answer_with_figures(prose, [glossary]) == prose
+    # Nor is a procedure answered in prose, without numbered steps.
+    assert answer_with_figures(prose, [procedure]) == prose

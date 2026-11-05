@@ -31,7 +31,7 @@ import chainlit as cl
 
 from app.config import settings
 from app.db import queries
-from app.rag import classifier, fallback, reranker
+from app.rag import attribution, classifier, fallback, reranker
 from app.rag.generator import stream_answer
 from app.rag.retriever import RetrievalResult, retrieve_scored
 from app.ui.figures import answer_with_figures
@@ -206,13 +206,16 @@ _FILLER_REPLY = (
 def _chunks_referenced_by(answer: str, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Pick the chunk(s) the answer drew on, for images + the citation.
 
-    Only 'procedure' chunks carry screenshots; 'index_entry' / 'glossary' /
-    'section_intro' chunks are text-only. A "How do I X?" query often ranks the
-    Quick-Index entry (same title, 0 images) above the real procedure, so we
-    must PREFER procedures here — otherwise the answer shows the steps but no
-    screenshots (and cites the index instead of the procedure).
+    First choice: the one chunk whose text the answer reproduces
+    (attribution.source_chunk). That is what keeps a twin procedure from
+    another manual, or a procedure the answer only mentions, from supplying
+    the screenshots and the citation.
 
-    Order of preference:
+    If no chunk clearly is the source (a heavily paraphrased answer), fall
+    back on titles. Only 'procedure' chunks carry screenshots; 'index_entry' /
+    'glossary' / 'section_intro' chunks are text-only. A "How do I X?" query
+    often ranks the Quick-Index entry (same title, 0 images) above the real
+    procedure, so the fallback PREFERS procedures:
       1. procedure chunks whose title appears in the answer,
       2. the highest-ranked procedure chunk retrieved (model may have paraphrased),
       3. any chunk whose title appears in the answer,
@@ -220,6 +223,10 @@ def _chunks_referenced_by(answer: str, chunks: list[dict[str, Any]]) -> list[dic
     """
     if not chunks:
         return []
+    source = attribution.source_chunk(answer, chunks)
+    if source is not None:
+        return [source]
+
     answer_lower = answer.lower()
     titled = [c for c in chunks if c.get("title") and c["title"].lower() in answer_lower]
 

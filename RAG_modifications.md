@@ -238,3 +238,41 @@ data fall back to the trailing block.
 "How do I dispense drugs to a patient?" and check each screenshot follows its step.
 **Known limits:** during streaming the answer is text only; screenshots slot in when the
 answer completes. An answer written without numbered steps keeps all screenshots at the end.
+
+---
+
+## M8 — Right source chunk, and full versions over summaries (✅ done 2026-11)
+**Status:** ✅ done (follow-up to M7, from stakeholder testing)
+**Where:** new `app/rag/attribution.py`, `app/rag/canonical.py`; `app/main.py`
+(`_chunks_referenced_by`); `app/rag/retriever.py` (step 5b); `app/ui/figures.py`;
+`app/db/queries.py` (`find_procedure_in_module`); `app/config.py` (`prefer_full_procedures`).
+**What:**
+  1. **Source chunk by content, not title.** The chunk an answer came from is now the one
+     whose text the answer reproduces (word coverage >= 0.5). Screenshots, citation and
+     cross-reference buttons come from that chunk only. The old title-in-answer heuristic
+     remains as a fallback for heavily paraphrased answers.
+  2. **Full version over summary.** If a retrieved procedure is a summary of a same-titled
+     procedure in the manual it points to ("See module: X"), the full one takes its place
+     in the ranked list. A procedure counts as a summary only if its own text says so
+     ("summarised here", "full step-by-step … is in …", "is performed in the … module") or
+     it has no screenshots while the other has some. Placeholders are never swapped in.
+  3. **Placement gaps.** A screenshot whose manual step the model dropped is placed between
+     its placed neighbours; a shortened step still matches. Leftovers are headed
+     "More screenshots" when others were placed.
+**Why (seen in testing):**
+  - "How do I send a patient for imaging?" showed Patient Management steps ("click the
+    Imaging Investigation button") with the Doctor manual's Investigations > Imaging
+    screenshots and citation — the answer quoted the other manual's title.
+  - "How do I register a patient?" answered from the Nursing summary, whose screenshots are
+    small cut-outs (175x45 px), instead of the Patient Management procedure with full-screen
+    annotated screenshots. Both ranked near-equal on meaning and keywords; the Patient
+    Management one lost on the UI-label lane (a long label list matches a short question
+    less closely) and landed 6th, outside the five chunks the model reads.
+  - Screenshots of a procedure only mentioned in a closing note were appended to the answer.
+**Scope today:** three summaries are redirected, all in Nursing — Register a patient
+(→ Patient Management), Admit a patient directly to a ward and Admit directly to the morgue
+(→ Direct Service Workflows). HR's "Approve a leave request" also points to a same-titled
+Employee Portal procedure but is not a summary, so it is left alone (covered by a test).
+**Effort:** code only. No re-ingest.
+**Rollback:** env `PREFER_FULL_PROCEDURES=false` restores the raw ranking.
+**Validation:** `docker compose exec app pytest tests/test_attribution.py tests/test_canonical.py tests/test_figures.py -v`

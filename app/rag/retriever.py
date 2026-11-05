@@ -42,7 +42,7 @@ import httpx
 
 from app.config import settings
 from app.db import queries
-from app.rag import reranker
+from app.rag import canonical, reranker
 
 log = logging.getLogger(__name__)
 
@@ -205,6 +205,16 @@ async def retrieve_scored(
     _t = time.perf_counter()
     chunks = await reranker.rerank(query, chunks)
     _timings["5_rerank"] = time.perf_counter() - _t
+
+    # 5b. A summary that points to a fuller, same-titled procedure in another
+    # manual gives way to that full version (see app/rag/canonical.py).
+    if settings.prefer_full_procedures:
+        _t = time.perf_counter()
+        try:
+            chunks = await canonical.prefer_full_versions(chunks)
+        except Exception:
+            log.exception("  could not resolve full versions; keeping the ranked list as is")
+        _timings["5b_full_versions"] = time.perf_counter() - _t
 
     # 6. Top-k
     out = chunks[:k]
