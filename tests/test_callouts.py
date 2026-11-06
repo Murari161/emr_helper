@@ -25,6 +25,10 @@ What each test catches (the first two were seen in stakeholder testing):
   test_ordinary_lines_untouched
 
   test_system_administrator_becomes_focal_person
+
+  test_missing_note_is_added_from_the_manual
+      Seen live: the HR leave note vanished because the model wrote the
+      Employee Portal's wording instead. The manual's own note must appear.
 """
 from __future__ import annotations
 
@@ -111,3 +115,49 @@ def test_system_administrator_becomes_focal_person(text: str) -> None:
 def test_other_administrator_roles_untouched() -> None:
     text = "Log in with the Administrator role."
     assert callouts.focal_person_wording(text) == text
+
+
+def test_missing_note_is_added_from_the_manual() -> None:
+    # Seen live: the model wrote the Employee Portal's wording, which was
+    # removed, so the HR procedure's own note must still appear.
+    answer = "1. Click the **Approve Leave** button.\n2. Click **Close**."
+    out = callouts.add_missing_callouts(answer, LEAVE)
+    assert out.startswith(answer)
+    assert out.endswith("**Note:** " + LEAVE["notes"])
+
+
+def test_missing_caution_is_added_and_present_one_not_repeated() -> None:
+    answer = "1. Click **Change Bed**."
+    out = callouts.add_missing_callouts(answer, BED)
+    assert out.count("Caution") == 1 and "irreversible" in out
+    assert callouts.add_missing_callouts(out, BED) == out           # already there: unchanged
+
+
+def test_nothing_added_when_the_manual_has_no_callouts() -> None:
+    assert callouts.add_missing_callouts(STEPS, BILL) == STEPS
+    assert callouts.add_missing_callouts(STEPS, None) == STEPS
+
+
+def test_placeholder_note_is_not_added() -> None:
+    stub = {"cautions": "", "notes": "This procedure is not yet documented in this manual."}
+    assert callouts.add_missing_callouts(STEPS, stub) == STEPS
+
+
+def test_focal_person_swap_keeps_spacing_and_drops_the_mandate_bracket() -> None:
+    text = ("Approval is governed by an approval mandate — contact the System Administrator "
+            "(configured in User and Facility Management).")
+    assert callouts.focal_person_wording(text) == (
+        "Approval is governed by an approval mandate — contact your facility's **eAFYA Focal Person**.")
+    assert callouts.focal_person_wording("Ask the System Administrator now.") == (
+        "Ask your facility's **eAFYA Focal Person** now.")
+
+
+def test_callouts_are_their_own_blockquote() -> None:
+    # A blockquote line straight after a step, or with text straight after it,
+    # would merge with that text; each callout must stand alone.
+    answer = "1. Click **Change Bed**.\nCaution: Changing a bed is irreversible once you click Yes.\nMore text."
+    lines = callouts.check_callouts(answer, [BED]).split("\n")
+    i = next(n for n, line in enumerate(lines) if line.startswith("> ⚠️ **Caution:**"))
+    assert lines[i - 1] == "" and lines[i + 1] == ""
+    out = callouts.add_missing_callouts("1. Click **Approve Leave**.", LEAVE)
+    assert out.split("\n")[-1].startswith("> **Note:** ")

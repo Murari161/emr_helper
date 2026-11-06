@@ -27,13 +27,15 @@ name = "eAFYA Assistant"
 description = "Documentation assistant for eAFYA, the Ministry of Health Uganda EMR system. Ask how to do any task and get the steps + screenshots from the official user manuals. Does not access patient data and does not give clinical advice."
 default_collapse_content = true
 default_theme = "light"
-# Custom CSS to enlarge the MoH coat-of-arms logo in the header.
+# Custom CSS: header logo size, green "Open: …" buttons, Caution / Note boxes.
 # Served by Chainlit's static handler from the project's public/ folder.
-custom_css = "/public/style.css"
-# Custom JS: tags the cross-reference "Open: …" action buttons with a class
-# (.emr-cta) by their visible text, so the CSS can style them reliably
-# regardless of Chainlit's internal button class names.
-custom_js = "/public/script.js"
+# BUMP ?v= WHENEVER style.css OR script.js CHANGES: browsers otherwise keep
+# using a cached copy, even after a hard refresh, and users miss the change.
+custom_css = "/public/style.css?v=2"
+# Custom JS: tags the "Open: …" buttons (.emr-cta) and the Caution / Note
+# boxes (.emr-caution / .emr-note) by their visible text, so the CSS can style
+# them regardless of Chainlit's internal class names.
+custom_js = "/public/script.js?v=2"
 # CTA shown on the welcome screen above the suggested-question buttons.
 cot = "tool_call"
 

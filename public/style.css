@@ -75,3 +75,49 @@ header,
 .emr-cta:active {
     transform: translateY(1px) !important;
 }
+
+/* -------------------------------------------------------------------------
+ * Caution and Note boxes in answers.
+ * Answers render each Caution / Note as a Markdown blockquote; public/script.js
+ * tags them .emr-caution / .emr-note. Colours follow the cleaned Word manuals:
+ * red for a Caution, amber for a Note. Translucent backgrounds so the boxes
+ * read in both the light and the dark theme. Chainlit renders bold text as
+ * span.font-bold rather than <strong>, so both are styled.
+ * ------------------------------------------------------------------------- */
+blockquote.emr-callout {
+    border-left: 4px solid !important;
+    border-radius: 6px !important;
+    padding: 8px 12px !important;
+    margin: 10px 0 !important;
+    font-style: normal !important;
+    color: inherit !important;
+}
+blockquote.emr-callout p,
+blockquote.emr-callout > div {
+    margin: 0 !important;
+}
+blockquote.emr-note {
+    border-left-color: #B8860B !important;
+    background-color: rgba(184, 134, 11, 0.12) !important;
+}
+blockquote.emr-note strong,
+blockquote.emr-note .font-bold {
+    color: #8A6508 !important;
+}
+blockquote.emr-caution {
+    border-left-color: #C00000 !important;
+    background-color: rgba(192, 0, 0, 0.09) !important;
+}
+blockquote.emr-caution strong,
+blockquote.emr-caution .font-bold {
+    color: #B00000 !important;
+}
+/* Dark theme: lighter label colours for contrast. */
+.dark blockquote.emr-note strong,
+.dark blockquote.emr-note .font-bold {
+    color: #E6B84A !important;
+}
+.dark blockquote.emr-caution strong,
+.dark blockquote.emr-caution .font-bold {
+    color: #FF6B6B !important;
+}

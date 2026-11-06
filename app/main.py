@@ -406,7 +406,9 @@ async def _respond(
     if outcome == fallback.ANSWERED and chunks and full_answer:
         chunks_used = _chunks_referenced_by(full_answer, chunks)
         # Cautions and Notes must be the manual's own (app/rag/callouts.py).
-        full_answer = callouts.focal_person_wording(callouts.check_callouts(full_answer, chunks_used))
+        full_answer = callouts.check_callouts(full_answer, chunks_used)
+        full_answer = callouts.add_missing_callouts(full_answer, chunks_used[0] if chunks_used else None)
+        full_answer = callouts.focal_person_wording(full_answer)
         citation = ""
         if "source:" not in full_answer.lower():
             cite_chunk = chunks_used[0] if chunks_used else chunks[0]

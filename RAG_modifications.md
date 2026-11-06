@@ -333,6 +333,15 @@ told users to contact the System Administrator.
 6 were invented outright and 16 were borrowed from a neighbouring procedure, including a caution
 about deleting patient records shown under "Discharge a patient". No caution that is in the
 manual was removed.
+**Manual callouts always shown:** any caution or note the procedure has but the answer left out
+is added at the end, in the manual's words (seen live: the HR leave note vanished because the
+model wrote the Employee Portal's wording, which the check removed). A placeholder note is not
+added. A "(configured in …)" bracket after "System Administrator" is dropped with it, since it
+describes the approval mandate.
+**Shown as coloured boxes:** each Caution / Note is its own Markdown blockquote; `public/script.js`
+tags it and `public/style.css` colours it like the cleaned manuals (red Caution, amber Note).
+`.chainlit/config.toml` now loads both files with `?v=2`: browsers kept serving the old
+script and stylesheet from cache even after a hard refresh. Bump `?v=` on every change to them.
 **Trade-off:** a true note borrowed from a related procedure (e.g. the Clinic Charge note under
 registration) is removed too, because the prompt's rule is one procedure per answer.
 **Effort:** code only. No re-ingest.
