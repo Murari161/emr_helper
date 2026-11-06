@@ -311,3 +311,30 @@ and click a button.
 **Tune later:** the sheets contain few truly vague questions, so the rule is calibrated
 mainly on invented ones. Review `select question from question_log where outcome='clarify'`
 once real users have tried it.
+
+---
+
+## M10 — Cautions and Notes checked against the manual; Focal Person wording (✅ done 2026-11)
+**Status:** ✅ done (found in stakeholder testing)
+**Where:** new `app/rag/callouts.py`; `app/main.py` (after the source chunk is chosen).
+**What:** after each answer, every Caution / Warning / Note line is compared with the manual
+text of the procedure the answer came from (>= 60% of its meaningful words must match):
+  - a Caution kept only if it is one of the procedure's cautions; if it matches a note or
+    the steps instead it is shown as a Note; otherwise it is removed;
+  - a Note kept if it matches a note or the steps; shown as a Caution if it matches a caution;
+    otherwise removed.
+"System Administrator" in an answer becomes "your facility's eAFYA Focal Person" (the
+manuals themselves are unchanged).
+**Why:** the prompt forbids invented or relabelled callouts, but the 3B model ignores it.
+Seen in testing: "Add a bill allocation" (no caution in the manual) got "⚠️ Caution: Ensure you
+have entered accurate billing information…"; the leave-approval Note was shown as a Caution and
+told users to contact the System Administrator.
+**Replay of all past answers:** 51 callout lines — 21 kept, 8 relabelled, 22 removed. Of the 22,
+6 were invented outright and 16 were borrowed from a neighbouring procedure, including a caution
+about deleting patient records shown under "Discharge a patient". No caution that is in the
+manual was removed.
+**Trade-off:** a true note borrowed from a related procedure (e.g. the Clinic Charge note under
+registration) is removed too, because the prompt's rule is one procedure per answer.
+**Effort:** code only. No re-ingest.
+**Validation:** `docker compose exec app pytest tests/test_callouts.py -v`; ask "How do I add a
+bill allocation?" — no Caution line.

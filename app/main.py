@@ -31,7 +31,7 @@ import chainlit as cl
 
 from app.config import settings
 from app.db import queries
-from app.rag import attribution, classifier, fallback, reranker, topics
+from app.rag import attribution, callouts, classifier, fallback, reranker, topics
 from app.rag.generator import stream_answer
 from app.rag.retriever import RetrievalResult, retrieve_scored
 from app.ui.figures import answer_with_figures
@@ -405,6 +405,8 @@ async def _respond(
     actions: list[cl.Action] = []
     if outcome == fallback.ANSWERED and chunks and full_answer:
         chunks_used = _chunks_referenced_by(full_answer, chunks)
+        # Cautions and Notes must be the manual's own (app/rag/callouts.py).
+        full_answer = callouts.focal_person_wording(callouts.check_callouts(full_answer, chunks_used))
         citation = ""
         if "source:" not in full_answer.lower():
             cite_chunk = chunks_used[0] if chunks_used else chunks[0]
