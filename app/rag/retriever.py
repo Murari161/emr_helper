@@ -111,6 +111,9 @@ class RetrievalResult:
     chunks: list[dict[str, Any]] = field(default_factory=list)
     top_vector: float = 0.0   # best cosine similarity in the vector lane
     top_bm25: float = 0.0     # best ts_rank_cd in the BM25 lane (0 = no lexical hit)
+    # Every fused candidate, each with its "vector_score". Used to offer a
+    # choice of topics when a question is vague (app/rag/topics.py).
+    candidates: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def is_strong(self) -> bool:
@@ -216,12 +219,16 @@ async def retrieve_scored(
             log.exception("  could not resolve full versions; keeping the ranked list as is")
         _timings["5b_full_versions"] = time.perf_counter() - _t
 
+    vector_scores = dict(ranked["vector"])
+    for c in chunks:
+        c["vector_score"] = vector_scores.get(c["id"], 0.0)
+
     # 6. Top-k
     out = chunks[:k]
     _total = time.perf_counter() - _t0
     _breakdown = "  ".join(f"{name}={secs:.2f}s" for name, secs in _timings.items())
     log.info("  ⏱ retrieve TOTAL=%.2fs  [%s]", _total, _breakdown)
-    result = RetrievalResult(chunks=out, top_vector=top_vector, top_bm25=top_bm25)
+    result = RetrievalResult(chunks=out, top_vector=top_vector, top_bm25=top_bm25, candidates=chunks)
     log.info(
         "  returned %d chunk(s), top-1 title=%r, match vector=%.3f bm25=%.3f strong=%s",
         len(out),

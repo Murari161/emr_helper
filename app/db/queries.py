@@ -259,11 +259,13 @@ async def get_chunks_by_ids(chunk_ids: list[UUID]) -> list[dict[str, Any]]:
         return []
 
     sql = """
-        SELECT id, doc_id, kind, section_path, title, when_to_use, content,
-               image_captions, images, ui_labels, cautions, notes,
-               page_start, page_end, manual_version, active, created_at
-        FROM chunks
-        WHERE id = ANY($1)
+        SELECT c.id, c.doc_id, c.kind, c.section_path, c.title, c.when_to_use, c.content,
+               c.image_captions, c.images, c.ui_labels, c.cautions, c.notes,
+               c.page_start, c.page_end, c.manual_version, c.active, c.created_at,
+               d.title AS manual
+        FROM chunks c
+        JOIN documents d ON d.id = c.doc_id
+        WHERE c.id = ANY($1)
     """
     pool = await get_pool()
     async with pool.acquire() as conn:

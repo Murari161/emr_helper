@@ -31,7 +31,7 @@ import chainlit as cl
 
 from app.config import settings
 from app.db import queries
-from app.rag import attribution, classifier, fallback, reranker
+from app.rag import attribution, classifier, fallback, reranker, topics
 from app.rag.generator import stream_answer
 from app.rag.retriever import RetrievalResult, retrieve_scored
 from app.ui.figures import answer_with_figures
@@ -161,38 +161,10 @@ async def on_chat_start() -> None:
 _LABEL_TOKEN_RE = re.compile(r"\S+")
 
 
-# Short, conversational, or pure-filler messages should not trigger retrieval.
+# Greetings and thanks should not trigger retrieval (fallback.is_chitchat).
 # Without this guard, typing "okay" sends "okay" through vector + BM25 + trigram
 # and produces a confident-looking answer drawn from whichever chunk happened
 # to top-rank. That's a confusing UX failure.
-_FILLER_PHRASES = {
-    "hi", "hello", "hey", "hey there", "yo",
-    "ok", "okay", "k", "kk", "sure", "right", "alright", "got it", "cool", "nice",
-    "yes", "yep", "yeah", "yup",
-    "no", "nope",
-    "thanks", "thank you", "thx", "ty", "cheers",
-    "bye", "goodbye",
-    "test", "testing",
-    "?",
-}
-
-
-def _is_filler_query(query: str) -> bool:
-    """Return True if the message doesn't look like a real question.
-
-    Heuristic: lowercased + stripped punctuation matches a known filler phrase,
-    OR the message is very short (fewer than 3 words and fewer than 12 chars).
-    """
-    q = query.lower().strip().rstrip("?!.,")
-    if not q:
-        return True
-    if q in _FILLER_PHRASES:
-        return True
-    if len(q.split()) < 3 and len(q) < 12:
-        return True
-    return False
-
-
 _FILLER_REPLY = (
     "Hello! 👋 I'm the **eAFYA Assistant** — I answer questions about how to "
     "use eAFYA from the official user manuals.\n\n"
@@ -284,7 +256,30 @@ def _reference_actions(chunks_used: list[dict[str, Any]]) -> list[cl.Action]:
     return actions
 
 
-async def _respond(query: str, conv_id: UUID | None, *, prefer_procedures: bool = False) -> None:
+def _topic_actions(options: list[dict[str, Any]]) -> list[cl.Action]:
+    """One button per offered topic. The payload pins the exact procedure, since
+    the same title can exist in several manuals."""
+    actions: list[cl.Action] = []
+    for c in options:
+        manual = re.sub(r"\s+Module$", "", c.get("manual") or "")
+        actions.append(
+            cl.Action(
+                name="open_topic",
+                payload={"chunk_id": str(c["id"]), "title": c.get("title") or ""},
+                label=f"📄 Open: {c.get('title')} ({manual})",
+                tooltip=f"Show the steps for '{c.get('title')}'",
+            )
+        )
+    return actions
+
+
+async def _respond(
+    query: str,
+    conv_id: UUID | None,
+    *,
+    prefer_procedures: bool = False,
+    pinned: dict[str, Any] | None = None,
+) -> None:
     """Retrieve → stream an answer → append captioned screenshots, a citation,
     and clickable cross-reference buttons → persist. Shared by on_message and
     the cross-reference action callback so both behave identically.
@@ -293,6 +288,9 @@ async def _respond(query: str, conv_id: UUID | None, *, prefer_procedures: bool 
     click searches a broad module name, which can match the module's text-only
     Quick Index / overview (no screenshots). Preferring procedure-kind chunks
     makes the opened workflow land on a real procedure that carries its images.
+
+    pinned: answer from exactly this chunk, without searching (a topic the user
+    chose from a list).
     """
     import time  # perf profiling (perf/latency-profiling branch)
     _t_req = time.perf_counter()
@@ -301,18 +299,21 @@ async def _respond(query: str, conv_id: UUID | None, *, prefer_procedures: bool 
     result = RetrievalResult()
     retrieval_failed = False
     _t = time.perf_counter()
-    async with cl.Step(name="Searching the manuals…", type="retrieval") as step:
-        try:
-            result = await retrieve_scored(query, k=8 if prefer_procedures else 5)
-            if prefer_procedures:
-                procs = [c for c in result.chunks if c.get("kind") == "procedure"]
-                if procs:
-                    result.chunks = procs[:5]
-            step.output = f"Found {len(result.chunks)} relevant chunk(s)."
-        except Exception:
-            log.exception("Retrieval failed")
-            retrieval_failed = True
-            step.output = "Retrieval failed — see logs."
+    if pinned is not None:
+        result = RetrievalResult(chunks=[pinned], top_vector=1.0)
+    else:
+        async with cl.Step(name="Searching the manuals…", type="retrieval") as step:
+            try:
+                result = await retrieve_scored(query, k=8 if prefer_procedures else 5)
+                if prefer_procedures:
+                    procs = [c for c in result.chunks if c.get("kind") == "procedure"]
+                    if procs:
+                        result.chunks = procs[:5]
+                step.output = f"Found {len(result.chunks)} relevant chunk(s)."
+            except Exception:
+                log.exception("Retrieval failed")
+                retrieval_failed = True
+                step.output = "Retrieval failed — see logs."
     chunks = result.chunks
     _retrieval_s = time.perf_counter() - _t
 
@@ -320,18 +321,38 @@ async def _respond(query: str, conv_id: UUID | None, *, prefer_procedures: bool 
         await _send_fixed_reply(fallback.ERROR_REPLY, fallback.ERROR, conv_id)
         return
 
+    # --- Vague question: ask which topic was meant ---
+    if pinned is None and not prefer_procedures:
+        asked = topics.clarification(query, result)
+        if asked is not None:
+            log.info(
+                "⏱ REQUEST TOTAL=%.2fs | vague question, offering %d topic(s) | query=%r",
+                time.perf_counter() - _t_req, len(asked.options), query[:60],
+            )
+            await _send_fixed_reply(
+                asked.reply, fallback.CLARIFY, conv_id,
+                chunks=asked.options, actions=_topic_actions(asked.options),
+            )
+            return
+
     # --- Weak match: don't generate, give a fixed reply ---
     # A cross-reference click searches for a workflow the manuals themselves
     # named, so it is always answered.
     if not prefer_procedures and not result.is_strong:
         _t = time.perf_counter()
         reply, outcome = await _classified_reply(query)
+        related: list[dict[str, Any]] = []
+        if outcome == fallback.NOT_IN_MANUAL:
+            # The Focal Person is still the answer; a close topic may also help.
+            related = topics.topic_options(result.candidates, limit=2, min_score=topics.MIN_VECTOR)
+            if related:
+                reply += "\n\n" + topics.RELATED_TOPICS_INTRO
         log.info(
             "⏱ REQUEST TOTAL=%.2fs | retrieval=%.2fs | classify=%.2fs | weak match (vector=%.3f bm25=%.3f) -> %s | query=%r",
             time.perf_counter() - _t_req, _retrieval_s, time.perf_counter() - _t,
             result.top_vector, result.top_bm25, outcome, query[:60],
         )
-        await _send_fixed_reply(reply, outcome, conv_id, chunks=chunks)
+        await _send_fixed_reply(reply, outcome, conv_id, chunks=chunks, actions=_topic_actions(related))
         return
 
     # --- Streaming generation ---
@@ -438,9 +459,10 @@ async def _send_fixed_reply(
     conv_id: UUID | None,
     *,
     chunks: list[dict[str, Any]] | None = None,
+    actions: list[cl.Action] | None = None,
 ) -> None:
-    """Send one of the fixed fallback.py replies and persist it with its outcome."""
-    await cl.Message(content=reply).send()
+    """Send one of the fixed replies and persist it with its outcome."""
+    await cl.Message(content=reply, actions=actions or []).send()
     if conv_id is None:
         return
     try:
@@ -477,7 +499,7 @@ async def on_message(message: cl.Message) -> None:
     )
 
     # --- Short-circuit conversational filler -----------------------------
-    if _is_filler_query(user_query):
+    if fallback.is_chitchat(user_query):
         await _send_fixed_reply(_FILLER_REPLY, fallback.FILLER, conv_id)
         return
 
@@ -501,3 +523,32 @@ async def on_open_reference(action: cl.Action) -> None:
             log.exception("Failed to persist reference-click turn")
     await cl.Message(content=f"📄 Opening **{query}**…").send()
     await _respond(query, conv_id, prefer_procedures=True)
+
+
+@cl.action_callback("open_topic")
+async def on_open_topic(action: cl.Action) -> None:
+    """A topic was chosen from a list: answer from exactly that procedure."""
+    payload = action.payload or {}
+    title = (payload.get("title") or "").strip()
+    if not title:
+        return
+    conv_id: UUID | None = cl.user_session.get("conversation_id")
+    if conv_id is not None:
+        try:
+            await queries.record_message(
+                conversation_id=conv_id, role="user", content=f"(chose topic) {title}",
+            )
+        except Exception:
+            log.exception("Failed to persist topic-click turn")
+    await cl.Message(content=f"📄 Opening **{title}**…").send()
+
+    chunk: dict[str, Any] | None = None
+    try:
+        rows = await queries.get_chunks_by_ids([UUID(payload.get("chunk_id"))])
+        chunk = rows[0] if rows else None
+    except Exception:
+        log.exception("Could not load the chosen topic; searching by its title instead")
+    if chunk is not None:
+        await _respond(title, conv_id, pinned=chunk)
+    else:
+        await _respond(title, conv_id, prefer_procedures=True)

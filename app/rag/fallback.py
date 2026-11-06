@@ -30,6 +30,7 @@ OFF_TOPIC = "off_topic"
 CLINICAL = "clinical"
 PATIENT_DATA = "patient_data"
 ABOUT_ASSISTANT = "about_assistant"
+CLARIFY = "clarify"                  # vague question: asked which topic was meant
 FILLER = "filler"
 ERROR = "error"
 
@@ -162,3 +163,21 @@ def is_stub(chunk: dict) -> bool:
         STUB_MARKER in (chunk.get("title") or "").lower()
         or STUB_MARKER in (chunk.get("content") or "").lower()
     )
+
+
+# --- Chit-chat --------------------------------------------------------------
+_CHITCHAT_WORDS = frozenset("""
+    hi hello hey yo there ok okay k kk sure right alright got it cool nice great good fine
+    morning afternoon evening yes yep yeah yup no nope thanks thank you thx ty cheers
+    much very bye goodbye test testing then
+""".split())
+
+
+def is_chitchat(query: str) -> bool:
+    """True for greetings, thanks and the like: messages that are not questions.
+
+    Decided by vocabulary, not length: "billing" and "lab test" are short but
+    they are questions about eAFYA.
+    """
+    words = re.findall(r"[a-z0-9+]+", query.lower())
+    return all(w in _CHITCHAT_WORDS for w in words)

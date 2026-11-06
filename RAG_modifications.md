@@ -276,3 +276,38 @@ Employee Portal procedure but is not a summary, so it is left alone (covered by 
 **Effort:** code only. No re-ingest.
 **Rollback:** env `PREFER_FULL_PROCEDURES=false` restores the raw ranking.
 **Validation:** `docker compose exec app pytest tests/test_attribution.py tests/test_canonical.py tests/test_figures.py -v`
+
+---
+
+## M9 — Vague questions: offer a choice of topics (✅ done 2026-11)
+**Status:** ✅ done (stakeholder feedback item 2)
+**Where:** new `app/rag/topics.py`; `app/main.py` (`_topic_actions`, `pinned` in `_respond`,
+`on_open_topic`); `app/rag/retriever.py` (`candidates`, `vector_score`); `app/db/queries.py`
+(`manual` on every chunk); `app/rag/fallback.py` (`CLARIFY`, `is_chitchat`).
+**What:**
+  1. **Asks back when vague.** One meaningful word ("billing"), or two with several topics
+     neck and neck ("patient records"), gets up to four green buttons, each naming the
+     topic and its manual, plus a tip on phrasing. Clicking answers from exactly that
+     procedure, without searching again.
+  2. **Tip only when there is nothing sensible to offer.** No meaningful words ("it is not
+     working") or no related topic ("how do I search") gets a request for more detail and
+     the eAFYA Focal Person.
+  3. **Never asks back on:** definitions, questions that name a topic, button labels
+     ("+New"), and words the manuals do not contain ("weather").
+  4. **Related topics under "not in the manuals".** The Focal Person reply gains up to two
+     buttons when a topic scores at least 0.55 (e.g. a wristband question offers "Print a
+     prescription"), so a near miss still leads somewhere.
+  5. **Chit-chat by vocabulary, not length.** The old rule treated anything under 12
+     characters as a greeting, so "billing", "queue" and "lab test" got "Hello!".
+Vague questions are logged with outcome `clarify` in `question_log`.
+**Measured on real search results:** 27 of 32 vague questions ask back; 0 of the 72
+questions on the two stakeholder sheets do; 0 of 8 short clear questions do.
+**The 5 that do not ask back:** "queue", "discharge" and "help with the queue" are answered
+from the glossary entry of that name; "how do i save" and "how do i change it" have only one
+related topic, so they are answered from it. The last two can be a poor guess.
+**Effort:** code only. No re-ingest.
+**Validation:** `docker compose exec app pytest tests/test_topics.py -v`; then type "billing"
+and click a button.
+**Tune later:** the sheets contain few truly vague questions, so the rule is calibrated
+mainly on invented ones. Review `select question from question_log where outcome='clarify'`
+once real users have tried it.
