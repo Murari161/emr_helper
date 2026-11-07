@@ -33,6 +33,13 @@ What each test catches:
   test_question_naming_a_topic_is_answered_despite_a_small_gap
       Seen on the test sheet: the stores tab question asked back needlessly.
 
+  test_not_working_gets_focal_person_and_the_steps
+      "reminder not working": the eAFYA Focal Person plus buttons to re-check
+      the steps. The assistant is a guide, not the final authority.
+
+  test_ordinary_questions_are_not_trouble
+      "patient not paying, what happens?" is a real question, not a failure.
+
   test_billing_is_not_chitchat
       Short messages used to be treated as greetings by length, so "billing"
       and "lab test" were answered with "Hello!".
@@ -157,3 +164,71 @@ def test_billing_is_not_chitchat(query: str) -> None:
 @pytest.mark.parametrize("query", ["hi", "Hello!", "ok then", "thanks", "thank you very much", "good morning", "?", ""])
 def test_chitchat(query: str) -> None:
     assert fallback.is_chitchat(query)
+
+
+# --- "X is not working" -------------------------------------------------------
+
+REMINDERS = [
+    chunk(11, "Schedule an appointment reminder", 0.70),
+    chunk(12, "Send a reminder", 0.69),
+    chunk(13, "Remove a reminder", 0.65),
+    chunk(14, "View a billing audit", 0.60),
+]
+
+
+@pytest.mark.parametrize("query", [
+    "reminder not working",
+    "the reminder is not sending",
+    "reminders are not going through",
+    "why can't I send a reminder?",
+    "I get an error when sending a reminder",
+    "reminder button is greyed out",
+    "my reminder won't send",
+])
+def test_not_working_gets_focal_person_and_the_steps(query: str) -> None:
+    out = topics.troubleshooting(query, Result(candidates=REMINDERS))
+    assert out is not None and out.reply == topics.TROUBLE_REPLY
+    assert fallback.FOCAL_PERSON in out.reply
+    assert [c["id"] for c in out.options] == [11, 12]          # related only, at most two
+
+
+@pytest.mark.parametrize("query", [
+    "How do I send a reminder?",
+    "patient not paying, what happens?",
+    "what happens if a patient doesn't pay?",
+    "The newborn is not doing well and requires NICU admission",
+    "the system shows zero stock for that drug",
+    "How do I issue drugs from the store?",
+    "How do I add a missing drug to the list?",
+    "How do I record a patient's problems and complaints?",
+    "How do I correct an error in a patient record?",
+])
+def test_ordinary_questions_are_not_trouble(query: str) -> None:
+    assert topics.troubleshooting(query, Result(candidates=REMINDERS)) is None
+
+
+@pytest.mark.parametrize("query", ["it is not working", "page is not loading", "my patient can't breathe"])
+def test_trouble_without_a_task_still_names_the_focal_person(query: str) -> None:
+    # No task identified: no buttons, but the Focal Person. (The chat handler
+    # first sends clinical / off-topic messages to their own replies.)
+    out = topics.troubleshooting(query, Result(candidates=REMINDERS))
+    assert out is not None and out.options == [] and out.reply == topics.TROUBLE_NO_TASK_REPLY
+    assert fallback.FOCAL_PERSON in out.reply
+
+
+def test_failure_words_do_not_pick_the_task() -> None:
+    # "not delivered" must not offer "Enter delivery details".
+    cands = [chunk(41, "Enter delivery details", 0.6), chunk(42, "Send a queued message", 0.55)]
+    assert topics.troubleshooting("sms not delivered", Result(candidates=cands)).options == []
+
+
+def test_clinical_trouble_is_not_an_eafya_problem() -> None:
+    cands = [chunk(21, "Recommend a patient for admission", 0.6), chunk(22, "Register a patient", 0.58)]
+    # No procedure is offered for it; the chat handler gives the clinical reply.
+    assert topics.troubleshooting("my patient can't breathe", Result(candidates=cands)).options == []
+    assert topics.troubleshooting("why can't I register a patient", Result(candidates=cands)) is not None
+
+
+def test_more_failure_verbs() -> None:
+    cands = [chunk(31, "Post an invoice and settle a payment", 0.7), chunk(32, "View a billing audit", 0.6)]
+    assert topics.troubleshooting("the invoice won't post", Result(candidates=cands)) is not None

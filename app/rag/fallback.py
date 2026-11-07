@@ -31,6 +31,7 @@ CLINICAL = "clinical"
 PATIENT_DATA = "patient_data"
 ABOUT_ASSISTANT = "about_assistant"
 CLARIFY = "clarify"                  # vague question: asked which topic was meant
+TROUBLESHOOT = "troubleshoot"        # "X is not working": Focal Person + X's steps
 FILLER = "filler"
 ERROR = "error"
 

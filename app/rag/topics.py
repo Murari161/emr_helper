@@ -58,6 +58,53 @@ CLARIFY_NO_TOPICS_REPLY = (
     f"If something in eAFYA is not working, your facility's **{fallback.FOCAL_PERSON}** can help."
 )
 RELATED_TOPICS_INTRO = "These topics in the manuals may be related:"
+TROUBLE_REPLY = (
+    "If you have followed all the steps and it still does not work, please contact "
+    f"your facility's **{fallback.FOCAL_PERSON}**.\n\n"
+    "To check the steps again:"
+)
+TROUBLE_NO_TASK_REPLY = (
+    "If something in eAFYA is not working after you have followed the steps, please "
+    f"contact your facility's **{fallback.FOCAL_PERSON}**.\n\n"
+    "If you tell me what you were trying to do, for example *registering a patient*, "
+    "I can show you the steps to check."
+)
+
+# "Something is not working" phrasing (stakeholder rule, Nov 2026: the
+# assistant is a guide, not the final authority — after the steps, the eAFYA
+# Focal Person is the answer). A failure word must be present; "doesn't" alone
+# is not enough ("what happens if a patient doesn't pay?" is a real question).
+# Apostrophes are optional throughout: users type "dont", "doesnt", "wont".
+# "wro?k" also catches the common typo "wroking".
+_TROUBLE_RE = re.compile(
+    r"\b(?:not|isn'?t|aren'?t|doesn'?t|don'?t|does\s+not|do\s+not|won'?t|will\s+not|didn'?t|did\s+not)\s+"
+    r"(?:w(?:or|ro)k\w*|sav\w*|send\w*|sent|open\w*|load\w*|show\w*|appear\w*|print\w*|submit\w*|"
+    r"go(?:ing)?\b|allow\w*|let\w*|respond\w*|accept\w*|reach\w*|display\w*|deliver\w*|"
+    r"updat\w*|receiv\w*|come|coming|post\w*|find|found|log\w*|sign\w*|connect\w*|"
+    r"generat\w*|export\w*|clos\w*|approv\w*|regist\w*|delet\w*|add\w*|chang\w*)"
+    r"|\b(?:can'?t|cannot|can\s+not|unable\s+to|fail\w*|refus\w*|fix\w*)\b"
+    r"|\bnothing\s+happens\b|\bdo(?:es)?\s+nothing\b|\bno\s+response\b|\bnot\s+responding\b"
+    r"|\b(?:stuck|hang\w*|frozen|freez\w*|crash\w*)\b"
+    r"|\bgreyed\s+out\b|\bdisabled\b|\baccess\s+denied\b",
+    re.IGNORECASE,
+)
+# Also ordinary words ("issue drugs", "a missing drug", "record a patient's
+# problems", "correct an error"), so they signal a failure only when the
+# message is not a how-to question.
+_TROUBLE_WEAK_RE = re.compile(r"\b(?:errors?|missing|bug|problems?|issues?)\b", re.IGNORECASE)
+_HOW_TO_RE = re.compile(r"^\s*(?:how|where|what|which|when|can\s+i|could\s+i)\b", re.IGNORECASE)
+# Words too common to tie a "not working" question to a task: "my patient
+# can't breathe" mentions a patient, but it is a clinical question, not an
+# eAFYA problem.
+_TOO_COMMON = frozenset("patient patients client clients staff user users person people facility hospital".split())
+# Failure words that say nothing about which task is meant.
+_TROUBLE_WORDS = frozenset("""
+    error errors unable cannot won didn doesn isn aren dont doesnt wont didnt isnt cant
+    fail fails failed failing refuse refuses refused refusing stuck greyed disabled wrong
+    nothing happens response responding hang hangs hanging frozen freeze freezes crash crashes
+    missing bug problem problems issue issues access denied giving bringing keeps keep press
+    click clicked clicking wroking
+""".split())
 
 
 @dataclass
@@ -156,3 +203,36 @@ def clarification(query: str, result: Any) -> Clarification | None:
     if len(options) == 1:
         return None                                # only one topic fits: answer normally
     return Clarification(reply=CLARIFY_REPLY, options=options[:MAX_OPTIONS])
+
+
+def is_trouble(query: str) -> bool:
+    """True if the question says something is not working."""
+    if _TROUBLE_RE.search(query):
+        return True
+    return bool(_TROUBLE_WEAK_RE.search(query)) and not _HOW_TO_RE.match(query)
+
+
+def troubleshooting(query: str, result: Any) -> Clarification | None:
+    """Reply for "X is not working": the Focal Person, plus X's steps to re-check.
+
+    The assistant does not guess at causes, and cannot know whether a feature
+    is switched on at a facility. Every recognised failure gets the Focal
+    Person. If no task in the manuals can be identified, the reply has no
+    options and the caller first rules out a clinical or off-topic message
+    ("my patient can't breathe") before sending it.
+
+    Returns None if the question is not about a failure.
+    """
+    if not is_trouble(query):
+        return None
+    # The words describing the failure ("not delivered", "did not receive")
+    # say nothing about the task, and would match unrelated procedures
+    # ("Enter delivery details").
+    failure_words: set[str] = set()
+    for m in list(_TROUBLE_RE.finditer(query)) + list(_TROUBLE_WEAK_RE.finditer(query)):
+        failure_words |= meaningful_words(m.group())
+    task_words = meaningful_words(query) - _TROUBLE_WORDS - failure_words - _TOO_COMMON
+    options = [c for c in topic_options(result.candidates, limit=20) if _is_related(c, task_words)] if task_words else []
+    if not options:
+        return Clarification(reply=TROUBLE_NO_TASK_REPLY)
+    return Clarification(reply=TROUBLE_REPLY, options=options[:2])

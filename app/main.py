@@ -321,6 +321,27 @@ async def _respond(
         await _send_fixed_reply(fallback.ERROR_REPLY, fallback.ERROR, conv_id)
         return
 
+    # --- "X is not working": the Focal Person, plus X's steps to re-check ---
+    if pinned is None and not prefer_procedures:
+        trouble = topics.troubleshooting(query, result)
+        if trouble is not None:
+            reply, outcome = trouble.reply, fallback.TROUBLESHOOT
+            if not trouble.options:
+                # No task identified: make sure it is not a clinical, patient-
+                # data or off-topic message ("my patient can't breathe").
+                label = await classifier.classify_question(query)
+                if label in ("CLINICAL", "PATIENT_DATA", "OTHER"):
+                    reply, outcome = fallback.fallback_reply(label, [])
+            log.info(
+                "⏱ REQUEST TOTAL=%.2fs | something not working, offering %d topic(s) -> %s | query=%r",
+                time.perf_counter() - _t_req, len(trouble.options), outcome, query[:60],
+            )
+            await _send_fixed_reply(
+                reply, outcome, conv_id,
+                chunks=trouble.options, actions=_topic_actions(trouble.options),
+            )
+            return
+
     # --- Vague question: ask which topic was meant ---
     if pinned is None and not prefer_procedures:
         asked = topics.clarification(query, result)

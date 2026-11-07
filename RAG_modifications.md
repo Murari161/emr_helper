@@ -347,3 +347,37 @@ registration) is removed too, because the prompt's rule is one procedure per ans
 **Effort:** code only. No re-ingest.
 **Validation:** `docker compose exec app pytest tests/test_callouts.py -v`; ask "How do I add a
 bill allocation?" — no Caution line.
+
+---
+
+## M11 — "Something is not working": the eAFYA Focal Person, plus the steps (✅ done 2026-11)
+**Status:** ✅ done (first part of stakeholder feedback item 4)
+**Principle (from the project lead):** the assistant is a guide, not the final authority. Once a
+user has followed the steps and something still does not work — a feature switched off at their
+facility, a system fault, anything — the answer is the eAFYA Focal Person. No list of which
+features are active where is kept: new features can never be exhausted.
+**Where:** `app/rag/topics.py` (`is_trouble`, `troubleshooting`); `app/main.py` (before the
+vague-question check); outcome `troubleshoot` in `question_log`.
+**What:**
+  1. A message saying something is not working ("reminder not working", "patient not saving",
+     "error when dispensing", "nothing happens when I click send") gets: "If you have followed
+     all the steps and it still does not work, please contact your facility's eAFYA Focal
+     Person", plus up to two buttons to re-check that task's steps.
+  2. If no task can be identified ("page is not loading"), the reply names the Focal Person and
+     asks what the user was trying to do. A clinical message ("my patient can't breathe") is
+     first checked by the classifier and gets the clinical reply instead.
+  3. No guessing at causes, and no claims about whether a feature is switched on.
+**Recognising real phrasing:** apostrophes optional ("dont", "doesnt"), the typo "wroking",
+"refuses", "nothing happens", "does nothing", "no response", "hanging", "frozen", "fix", "greyed
+out", "access denied". "Error", "missing", "problem", "issue" and "bug" count only outside a
+how-to question, because they are ordinary words too ("how do I issue drugs").
+**Measured:** 40 of 40 messy, realistic failure messages recognised and sent to the Focal Person
+(32 with the right steps to re-check); 0 false alarms on the 72 stakeholder-sheet questions and
+17 ordinary how-to questions; 3 of 3 clinical failure messages routed to the clinical reply.
+**Limits:** phrase-based, so new wordings will be missed; a missed one gets the normal answer
+(the steps), not a wrong one. Review `select question from question_log where outcome =
+'troubleshoot'` and the unanswered questions after real use. Steps offered can be imperfect
+("registration refusing" offers "Register a deceased individual" first).
+**Still to do (item 4, part two):** checks drawn from the manuals per task, such as required
+fields, once a super user has verified them.
+**Validation:** `docker compose exec app pytest tests/test_topics.py -v`; ask "reminder not working".
