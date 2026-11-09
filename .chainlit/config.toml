@@ -4,8 +4,8 @@
 [project]
 # Enables the cleanup of old chats on session end.
 enable_telemetry = false
-# Allow the bot to be accessed by anonymous users; the reverse proxy (Caddy)
-# is responsible for authentication and passes a signed user header.
+# No keys are asked of the user. Logins are handled by Chainlit's login page,
+# against the accounts in app_users (app/auth.py).
 user_env = []
 # Time before a session is reclaimed (seconds).
 session_timeout = 3600
@@ -31,11 +31,12 @@ default_theme = "light"
 # Served by Chainlit's static handler from the project's public/ folder.
 # BUMP ?v= WHENEVER style.css OR script.js CHANGES: browsers otherwise keep
 # using a cached copy, even after a hard refresh, and users miss the change.
-custom_css = "/public/style.css?v=2"
+custom_css = "/public/style.css?v=3"
 # Custom JS: tags the "Open: …" buttons (.emr-cta) and the Caution / Note
 # boxes (.emr-caution / .emr-note) by their visible text, so the CSS can style
-# them regardless of Chainlit's internal class names.
-custom_js = "/public/script.js?v=2"
+# them regardless of Chainlit's internal class names. Also adds "Change your
+# password" and "Manage accounts" to the user menu at the top right.
+custom_js = "/public/script.js?v=3"
 # CTA shown on the welcome screen above the suggested-question buttons.
 cot = "tool_call"
 

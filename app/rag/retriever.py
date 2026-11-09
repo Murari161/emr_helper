@@ -42,7 +42,7 @@ import httpx
 
 from app.config import settings
 from app.db import queries
-from app.rag import canonical, reranker
+from app.rag import access, canonical, reranker
 
 log = logging.getLogger(__name__)
 
@@ -114,6 +114,10 @@ class RetrievalResult:
     # Every fused candidate, each with its "vector_score". Used to offer a
     # choice of topics when a question is vague (app/rag/topics.py).
     candidates: list[dict[str, Any]] = field(default_factory=list)
+    # Set when the question is about a manual this user may not be answered
+    # from (app/rag/access.py); the chunks above then come from the open
+    # manuals only and must not be used to answer.
+    restricted_manual: str | None = None
 
     @property
     def is_strong(self) -> bool:
@@ -129,9 +133,12 @@ async def retrieve(
     *,
     k: int = 5,
     manual_versions: list[str] | None = None,
+    excluded_manuals: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Top-k chunks for a query. See retrieve_scored() for the pipeline."""
-    result = await retrieve_scored(query, k=k, manual_versions=manual_versions)
+    result = await retrieve_scored(
+        query, k=k, manual_versions=manual_versions, excluded_manuals=excluded_manuals
+    )
     return result.chunks
 
 
@@ -140,6 +147,7 @@ async def retrieve_scored(
     *,
     k: int = 5,
     manual_versions: list[str] | None = None,
+    excluded_manuals: list[str] | None = None,
 ) -> RetrievalResult:
     """Run the full hybrid pipeline for a single user query.
 
@@ -154,7 +162,13 @@ async def retrieve_scored(
     manual_versions=None means "search across all loaded versions" — fine
     for v1 where we only have one version. Phase 6+ will use this for
     A/B testing across manual revisions.
+
+    excluded_manuals: manuals this user may not be answered from (the
+    restricted manuals for an ordinary user). They are left out of every
+    step, and result.restricted_manual says whether the question is really
+    about one of them (app/rag/access.py).
     """
+    excluded = list(excluded_manuals or [])
     if not query.strip():
         return RetrievalResult()
 
@@ -175,11 +189,20 @@ async def retrieve_scored(
         query_text=query,
         query_vec=qvec,
         manual_versions=manual_versions,
+        excluded_manuals=excluded,
         k_vector=K_VECTOR,
         k_bm25=K_BM25,
         k_trigram=K_TRIGRAM,
     )
     _timings["2_hybrid_search"] = time.perf_counter() - _t
+
+    # 2b. Best match inside the restricted manuals (decided in step 4b).
+    best_manual: str | None = None
+    best_score, best_title = 0.0, None
+    if excluded:
+        _t = time.perf_counter()
+        best_manual, best_score, best_title = await queries.best_match_in_manuals(qvec, excluded)
+        _timings["2b_restricted"] = time.perf_counter() - _t
     log.debug(
         "  candidates: %d vector / %d bm25 / %d trigram",
         len(ranked["vector"]), len(ranked["bm25"]), len(ranked["trigram"]),
@@ -191,7 +214,10 @@ async def retrieve_scored(
     _timings["3_rrf_fuse"] = time.perf_counter() - _t
     if not fused:
         log.info("  no candidates after fusion")
-        return RetrievalResult()
+        return RetrievalResult(restricted_manual=access.restricted_match(
+            best_manual, best_score, 0.0,
+            strong=settings.match_strong_vector, gap=settings.restricted_gap, best_title=best_title,
+        ))
     top_ids = [doc_id for doc_id, _score in fused[:K_TO_RERANK]]
     # Lane lists are score-descending, so [0] is each lane's best match.
     top_vector = ranked["vector"][0][1] if ranked["vector"] else 0.0
@@ -201,8 +227,25 @@ async def retrieve_scored(
     _t = time.perf_counter()
     chunks = await queries.get_chunks_by_ids(top_ids)
     _timings["4_hydrate_rows"] = time.perf_counter() - _t
+    # 4b. Is the question about a restricted manual? Its best match there must
+    # be strong, clearly beat the open manuals, and not be documented in an
+    # open manual under the same title (app/rag/access.py).
+    restricted_manual: str | None = None
+    if excluded:
+        open_top = ranked["vector"][0][1] if ranked["vector"] else 0.0
+        restricted_manual = access.restricted_match(
+            best_manual, best_score, open_top,
+            strong=settings.match_strong_vector, gap=settings.restricted_gap,
+            best_title=best_title, open_titles=[c.get("title") or "" for c in chunks],
+        )
+        log.info(
+            "  restricted manuals: best %r (%r) %.3f vs open %.3f -> %s",
+            best_title, best_manual, best_score, open_top,
+            restricted_manual or "answer from the open manuals",
+        )
+
     if not chunks:
-        return RetrievalResult()
+        return RetrievalResult(restricted_manual=restricted_manual)
 
     # 5. Rerank (cross-encoder)
     _t = time.perf_counter()
@@ -214,10 +257,14 @@ async def retrieve_scored(
     if settings.prefer_full_procedures:
         _t = time.perf_counter()
         try:
-            chunks = await canonical.prefer_full_versions(chunks)
+            chunks = await canonical.prefer_full_versions(chunks, excluded_manuals=excluded)
         except Exception:
             log.exception("  could not resolve full versions; keeping the ranked list as is")
         _timings["5b_full_versions"] = time.perf_counter() - _t
+
+    # Safety net: nothing from an excluded manual leaves this function.
+    if excluded:
+        chunks = [c for c in chunks if access.is_allowed(c, excluded)]
 
     vector_scores = dict(ranked["vector"])
     for c in chunks:
@@ -228,7 +275,10 @@ async def retrieve_scored(
     _total = time.perf_counter() - _t0
     _breakdown = "  ".join(f"{name}={secs:.2f}s" for name, secs in _timings.items())
     log.info("  ⏱ retrieve TOTAL=%.2fs  [%s]", _total, _breakdown)
-    result = RetrievalResult(chunks=out, top_vector=top_vector, top_bm25=top_bm25, candidates=chunks)
+    result = RetrievalResult(
+        chunks=out, top_vector=top_vector, top_bm25=top_bm25, candidates=chunks,
+        restricted_manual=restricted_manual,
+    )
     log.info(
         "  returned %d chunk(s), top-1 title=%r, match vector=%.3f bm25=%.3f strong=%s",
         len(out),

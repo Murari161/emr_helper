@@ -2,7 +2,7 @@
 
 The Phase 5 wiring:
     on_chat_start
-        - read X-User header (set by Caddy basic-auth)
+        - read the logged-in account
         - create a conversations row for this session
         - greet + show starters
     on_message
@@ -16,9 +16,11 @@ The Phase 5 wiring:
           illustrates (from the chunks the answer actually drew on), append
           a citation footer, persist the assistant turn
 
-Header auth: Caddy validates basic-auth and forwards X-User. We treat that
-as the user identity. If the header isn't present (dev without auth, or
-auth disabled), we fall back to "anonymous".
+Logins (stakeholder item 5): Chainlit's login page checks the username and
+password against app_users (app/auth.py). Every question re-reads the account,
+so a disabled account or a role change takes effect at once. Ordinary users
+are not answered from the restricted manuals (app/rag/access.py); super users
+see everything and manage accounts at /admin (app/ui/admin.py).
 """
 from __future__ import annotations
 
@@ -29,11 +31,13 @@ from uuid import UUID
 
 import chainlit as cl
 
+from app import auth
 from app.config import settings
 from app.db import queries
-from app.rag import attribution, callouts, classifier, fallback, reranker, topics
+from app.rag import access, attribution, callouts, classifier, fallback, reranker, topics
 from app.rag.generator import stream_answer
 from app.rag.retriever import RetrievalResult, retrieve_scored
+from app.ui import admin
 from app.ui.figures import answer_with_figures
 from app.ui.starters import get_starters
 
@@ -69,11 +73,12 @@ try:
         # app.mount() appends AFTER it, so /images/* gets shadowed by the SPA
         # (the browser receives HTML, not the PNG → broken image). Inserting the
         # static mount first gives it priority over the catch-all.
+        # Behind the login: only logged-in users get the screenshots.
         _fastapi_app.router.routes.insert(
             0,
             Mount(
                 settings.images_url_prefix,
-                app=StaticFiles(directory=str(settings.images_dir)),
+                app=admin.LoginRequired(StaticFiles(directory=str(settings.images_dir))),
                 name="manual-images",
             ),
         )
@@ -87,32 +92,70 @@ try:
 except Exception:  # noqa: BLE001 — never let static wiring crash app startup
     log.exception("Could not mount manual images; screenshots may not render inline")
 
+# Account pages: /admin (super users) and /account (everyone).
+from chainlit.server import app as _server_app  # noqa: E402
+
+admin.register(_server_app)
+
 
 # ---------------------------------------------------------------------------
-# Authentication.
+# Authentication (stakeholder item 5).
 #
-# DISABLED: the Chainlit header-auth callback below made Chainlit show its own
-# /login page and call POST /auth/header from the browser. Behind Caddy basic
-# auth this loops: the browser does not attach the cached basic-auth header to
-# those background fetches, so Caddy 401s them and Chainlit bounces back to
-# /login forever (confirmed in the Caddy access logs — /auth/header without an
-# Authorization header returns 401).
-#
-# Access is already gated by Caddy basic auth (username admin) in front of the
-# whole app, so we let Chainlit run WITHOUT its own auth layer: pass the native
-# basic-auth dialog once and you are straight into the chat. Without an auth
-# callback registered, on_chat_start's `cl.user_session.get("user")` is None and
-# user_id falls back to "anonymous" (already handled below).
-#
-# To restore per-user identity later, prefer a single auth mechanism (e.g.
-# Chainlit OAuth/password auth, OR read X-User in on_chat_start) rather than
-# stacking Chainlit header-auth on top of Caddy basic-auth.
+# One login per person, checked against app_users. Caddy no longer asks for a
+# password (its pop-up login could not tell people apart); it only provides
+# HTTPS. Repeated wrong passwords lock the username for a while (auth.LoginGuard).
 # ---------------------------------------------------------------------------
 
-# @cl.header_auth_callback
-# def header_auth(headers) -> cl.User | None:
-#     user_id = (headers.get("x-user") or headers.get("X-User") or "anonymous").strip()
-#     return cl.User(identifier=user_id, metadata={"source": "header"})
+_login_guard = auth.LoginGuard()
+
+
+@cl.password_auth_callback
+async def password_login(username: str, password: str) -> cl.User | None:
+    name = auth.normalise_username(username)
+    if _login_guard.is_locked(name):
+        log.warning("login refused: %r is locked after repeated wrong passwords", name)
+        return None
+    try:
+        account = await queries.get_app_user(name)
+    except Exception:
+        log.exception("login: could not read the account")
+        return None
+    # A wrong username costs the same time as a wrong password.
+    ok = auth.verify_password(password, account["password_hash"] if account else auth.DUMMY_HASH)
+    if not (ok and account and account["active"]):
+        _login_guard.failed(name)
+        log.info("login failed for %r", name)
+        return None
+    _login_guard.succeeded(name)
+    try:
+        await queries.touch_app_user_login(name)
+    except Exception:
+        log.exception("login: could not record the login time")
+    log.info("login: %r (%s)", name, account["role"])
+    return cl.User(identifier=name, display_name=account["full_name"] or name, metadata={"role": account["role"]})
+
+
+async def _current_account() -> dict[str, Any] | None:
+    """The logged-in account, read fresh from the database (None if unknown)."""
+    user = cl.user_session.get("user")
+    if not isinstance(user, cl.User):
+        return None
+    try:
+        return await queries.get_app_user(user.identifier)
+    except Exception:
+        log.exception("Could not read the account of %r", user.identifier)
+        return None
+
+
+async def _gate() -> tuple[dict[str, Any] | None, list[str]]:
+    """Check the account before answering: (account, manuals it may not be
+    answered from), or (None, []) after telling the user why it cannot ask."""
+    account = await _current_account()
+    blocked = access.account_block_reply(account)
+    if blocked:
+        await cl.Message(content=blocked).send()
+        return None, []
+    return account, access.excluded_manuals(account["role"], settings.restricted_manuals)
 
 
 # ---------------------------------------------------------------------------
@@ -126,8 +169,8 @@ async def set_starters():
 
 @cl.on_chat_start
 async def on_chat_start() -> None:
-    user = cl.user_session.get("user")
-    user_id = user.identifier if isinstance(user, cl.User) else "anonymous"
+    account = await _current_account()
+    user_id = account["username"] if account else "anonymous"
 
     conv_id = await queries.create_conversation(user_id=user_id)
     cl.user_session.set("conversation_id", conv_id)
@@ -149,6 +192,8 @@ async def on_chat_start() -> None:
             "Try one of the suggestions below, or ask anything in your own words."
         ),
     ).send()
+    if account and account["must_change_password"]:
+        await cl.Message(content=access.CHANGE_PASSWORD_REPLY).send()
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +322,7 @@ async def _respond(
     query: str,
     conv_id: UUID | None,
     *,
+    excluded: list[str],
     prefer_procedures: bool = False,
     pinned: dict[str, Any] | None = None,
 ) -> None:
@@ -291,6 +337,8 @@ async def _respond(
 
     pinned: answer from exactly this chunk, without searching (a topic the user
     chose from a list).
+
+    excluded: manuals this user may not be answered from (app/rag/access.py).
     """
     import time  # perf profiling (perf/latency-profiling branch)
     _t_req = time.perf_counter()
@@ -301,10 +349,14 @@ async def _respond(
     _t = time.perf_counter()
     if pinned is not None:
         result = RetrievalResult(chunks=[pinned], top_vector=1.0)
+        if not access.is_allowed(pinned, excluded):
+            result.restricted_manual = pinned.get("manual")
     else:
         async with cl.Step(name="Searching the manuals…", type="retrieval") as step:
             try:
-                result = await retrieve_scored(query, k=8 if prefer_procedures else 5)
+                result = await retrieve_scored(
+                    query, k=8 if prefer_procedures else 5, excluded_manuals=excluded
+                )
                 if prefer_procedures:
                     procs = [c for c in result.chunks if c.get("kind") == "procedure"]
                     if procs:
@@ -319,6 +371,15 @@ async def _respond(
 
     if retrieval_failed:
         await _send_fixed_reply(fallback.ERROR_REPLY, fallback.ERROR, conv_id)
+        return
+
+    # --- A task in a manual this user may not be answered from ---
+    if result.restricted_manual:
+        log.info(
+            "⏱ REQUEST TOTAL=%.2fs | restricted (%s) | query=%r",
+            time.perf_counter() - _t_req, result.restricted_manual, query[:60],
+        )
+        await _send_fixed_reply(access.restricted_reply(result.restricted_manual), access.RESTRICTED, conv_id)
         return
 
     # --- "X is not working": the Focal Person, plus X's steps to re-check ---
@@ -361,7 +422,7 @@ async def _respond(
     # named, so it is always answered.
     if not prefer_procedures and not result.is_strong:
         _t = time.perf_counter()
-        reply, outcome = await _classified_reply(query)
+        reply, outcome = await _classified_reply(query, excluded)
         related: list[dict[str, Any]] = []
         if outcome == fallback.NOT_IN_MANUAL:
             # The Focal Person is still the answer; a close topic may also help.
@@ -419,7 +480,7 @@ async def _respond(
             # The model found nothing usable in a strong match. Say WHY in the
             # same words a weak match would get: "how many patients are
             # admitted today?" is a patient-data question, not a manual gap.
-            full_answer, outcome = await _classified_reply(query)
+            full_answer, outcome = await _classified_reply(query, excluded)
 
     # Screenshots, the citation and cross-reference buttons belong to a real
     # answer only — never under a decline or an error.
@@ -466,16 +527,20 @@ async def _respond(
             log.exception("Failed to persist assistant message")
 
 
-async def _classified_reply(query: str) -> tuple[str, str]:
+async def _classified_reply(query: str, excluded: list[str]) -> tuple[str, str]:
     """Classify a question the manuals can't answer -> (fixed reply, outcome)."""
     label = await classifier.classify_question(query)
     modules: list[str] = []
+    hidden: list[str] = []
     if label == classifier.ASSISTANT:
         try:
-            modules = await queries.list_document_titles()
+            modules, hidden = access.visible_modules(await queries.list_document_titles(), excluded)
         except Exception:
             log.exception("Could not list manuals for the 'about' reply")
-    return fallback.fallback_reply(label, modules)
+    reply, outcome = fallback.fallback_reply(label, modules)
+    if outcome == fallback.ABOUT_ASSISTANT:
+        reply += access.restricted_modules_line(hidden)
+    return reply, outcome
 
 
 async def _send_fixed_reply(
@@ -508,12 +573,14 @@ async def on_message(message: cl.Message) -> None:
     if not user_query:
         return
 
+    account, excluded = await _gate()
+    if account is None:
+        return
+
     conv_id: UUID | None = cl.user_session.get("conversation_id")
     if conv_id is None:
         # Edge case: on_chat_start didn't run (race / refresh). Recover.
-        user = cl.user_session.get("user")
-        user_id = user.identifier if isinstance(user, cl.User) else "anonymous"
-        conv_id = await queries.create_conversation(user_id=user_id)
+        conv_id = await queries.create_conversation(user_id=account["username"])
         cl.user_session.set("conversation_id", conv_id)
 
     # Persist the user turn now so it's recoverable even if generation fails.
@@ -528,7 +595,7 @@ async def on_message(message: cl.Message) -> None:
         await _send_fixed_reply(_FILLER_REPLY, fallback.FILLER, conv_id)
         return
 
-    await _respond(user_query, conv_id)
+    await _respond(user_query, conv_id, excluded=excluded)
 
 
 @cl.action_callback("open_reference")
@@ -537,6 +604,9 @@ async def on_open_reference(action: cl.Action) -> None:
     workflow and post it as a fresh answer (with its own screenshots/buttons)."""
     query = ((action.payload or {}).get("query") or "").strip()
     if not query:
+        return
+    account, excluded = await _gate()
+    if account is None:
         return
     conv_id: UUID | None = cl.user_session.get("conversation_id")
     if conv_id is not None:
@@ -547,7 +617,7 @@ async def on_open_reference(action: cl.Action) -> None:
         except Exception:
             log.exception("Failed to persist reference-click turn")
     await cl.Message(content=f"📄 Opening **{query}**…").send()
-    await _respond(query, conv_id, prefer_procedures=True)
+    await _respond(query, conv_id, excluded=excluded, prefer_procedures=True)
 
 
 @cl.action_callback("open_topic")
@@ -556,6 +626,9 @@ async def on_open_topic(action: cl.Action) -> None:
     payload = action.payload or {}
     title = (payload.get("title") or "").strip()
     if not title:
+        return
+    account, excluded = await _gate()
+    if account is None:
         return
     conv_id: UUID | None = cl.user_session.get("conversation_id")
     if conv_id is not None:
@@ -574,6 +647,6 @@ async def on_open_topic(action: cl.Action) -> None:
     except Exception:
         log.exception("Could not load the chosen topic; searching by its title instead")
     if chunk is not None:
-        await _respond(title, conv_id, pinned=chunk)
+        await _respond(title, conv_id, excluded=excluded, pinned=chunk)
     else:
-        await _respond(title, conv_id, prefer_procedures=True)
+        await _respond(title, conv_id, excluded=excluded, prefer_procedures=True)

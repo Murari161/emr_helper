@@ -381,3 +381,52 @@ how-to question, because they are ordinary words too ("how do I issue drugs").
 **Still to do (item 4, part two):** checks drawn from the manuals per task, such as required
 fields, once a super user has verified them.
 **Validation:** `docker compose exec app pytest tests/test_topics.py -v`; ask "reminder not working".
+
+---
+
+## M12 — User roles and individual logins (✅ done 2026-11)
+**Status:** ✅ done (stakeholder feedback item 5)
+**Decisions (project lead):** the app's own login page, one account per person; an honest "limited
+to super users" reply rather than pretending the topic does not exist; super users manage
+accounts on a page inside the app. Restricted manuals, "for now": Human Resources and User &
+Facility Management.
+**Where:** `app/auth.py` (passwords, rules, lock), `app/rag/access.py` (who may be answered from
+what), `app/ui/admin.py` (`/admin`, `/account`, screenshots behind the login), `scripts/users.py`
+(first super user, recovery), `app/rag/retriever.py` (steps 2b, 4b), `app/main.py` (`_gate`),
+table `app_users`. Caddy no longer asks for a password.
+**What:**
+  1. Passwords are stored only as scrypt hashes. A new or reset account gets a temporary password,
+     shown once, and must choose its own at `/account` before the assistant answers. Five wrong
+     passwords lock a username for 15 minutes.
+  2. Every question re-reads the account, so disabling someone or changing a role takes effect at
+     their next question, even in an open chat.
+  3. For an ordinary user, every search skips the restricted manuals, and so do the topic buttons
+     and the swap of a summary for its full version. A final filter in the retriever drops
+     anything that still comes from one.
+  4. A question is about a restricted task only if its best match there is strong (>= 0.60),
+     beats the best open match by at least `RESTRICTED_GAP` (0.03), and no open manual has a
+     procedure of the same title. Otherwise it is answered from the open manuals.
+  5. Outcome `restricted` in `question_log`; `user_id` is now the username.
+  6. "Change your password" (everyone) and "Manage accounts" (super users) are in the menu at the
+     top right, added by `public/script.js` because Chainlit has no setting for it. If a Chainlit
+     upgrade breaks that, `/account` and `/admin` still open directly. The only account message
+     in the chat is the first-login "choose your own password".
+**Caddy keep-alive:** the app closes idle connections after 5 s and Caddy kept them for 2 minutes,
+so a POST sent at that instant (login, logout, the account forms) got a 502; Caddy cannot safely
+retry a POST. Seen once on a real logout (Caddy log: "write: connection reset by peer"); it could
+not be reproduced on demand (0 of 20 timed attempts), so the fix has no before-and-after
+measurement. `keepalive 2s` in the Caddyfile closes idle connections first.
+**Why the same-title rule:** "Add a referring facility" is a full procedure in Patient Management
+and in User & Facility Management, and scores higher in the latter (0.840 vs 0.799). On the gap
+alone, ordinary users were wrongly refused a task their own manual documents.
+**Measured** (every procedure title asked as a question, through the full retrieval path):
+60 of 63 restricted titles refused (the other 3 are also full procedures in open manuals); 0 of
+379 open titles refused; 0 restricted chunks in any ordinary user's candidates; 0 of 14 everyday
+open wordings refused ("reset my password", "apply for leave", "leave", "my leave balance"). The
+extra lookup takes about 0.01 s.
+**Limits:** some restricted wordings get an open answer instead of the refusal: "reset a user's
+password" gets resetting your own (not a leak, but not what was asked). The lock is per app
+process, so a restart clears it. Password changes do not end sessions already logged in.
+**Before going online:** set `allow_origins` in `.chainlit/config.toml` to the real hostname.
+**Validation:** `docker compose exec app pytest tests/test_auth.py tests/test_access.py
+tests/test_admin.py -v`; log in as an ordinary user and ask "How do I create a user account?".

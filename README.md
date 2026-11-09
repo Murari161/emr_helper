@@ -6,7 +6,7 @@ A standalone documentation chatbot for the **Ministry of Health Electronic Medic
 
 ## Quick start
 
-For full step-by-step instructions — including how to generate the Chainlit auth secret, set the Caddy basic-auth password, troubleshoot common errors, and operate the running stack — see **[SETUP.md](SETUP.md)**.
+For full step-by-step instructions — including how to generate the Chainlit auth secret, create your first login, troubleshoot common errors, and operate the running stack — see **[SETUP.md](SETUP.md)**.
 
 The short version, once you've installed Docker:
 
@@ -14,10 +14,10 @@ The short version, once you've installed Docker:
 git clone https://github.com/Murari161/emr_helper.git
 cd emr_helper
 cp .env.example .env                                       # then edit .env: set CHAINLIT_AUTH_SECRET
-docker run --rm caddy:2-alpine caddy hash-password \
-    --plaintext "yourpassword"                              # paste hash into caddy/Caddyfile
 docker compose up -d --build                                # ~5–15 min on first run
-# Open http://localhost:8000  (basic-auth: admin / yourpassword)
+docker compose exec app python -m scripts.users add admin --role super_user
+# Open http://localhost:8000 and log in with the temporary password it printed.
+# Super users add everyone else at http://localhost:8000/admin
 ```
 
 The ingestion step (Phase 3 onwards) will be:
@@ -32,7 +32,7 @@ docker compose exec app python -m scripts.ingest /data/knowledge_base/
 ## Architecture overview
 
 ```
-Browser ──▶ Caddy (basic auth) ──▶ Chainlit + FastAPI ──┬──▶ Postgres + pgvector
+Browser ──▶ Caddy ──▶ Chainlit + FastAPI (login) ──┬──▶ Postgres + pgvector
                                                         │     (chunks · BM25 · trigram)
                                                         └──▶ Ollama
                                                               ├─ bge-m3 (embeddings)

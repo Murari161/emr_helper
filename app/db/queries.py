@@ -174,6 +174,7 @@ _VECTOR_SQL = """
     FROM chunks
     WHERE active = true
       AND ($2::text[] IS NULL OR manual_version = ANY($2))
+      AND ($4::text[] IS NULL OR doc_id NOT IN (SELECT id FROM documents WHERE title = ANY($4)))
       AND embedding IS NOT NULL
     ORDER BY embedding <=> $1::vector
     LIMIT $3
@@ -184,6 +185,7 @@ _BM25_SQL = """
     FROM chunks, plainto_tsquery('english', $1) AS q
     WHERE active = true
       AND ($2::text[] IS NULL OR manual_version = ANY($2))
+      AND ($4::text[] IS NULL OR doc_id NOT IN (SELECT id FROM documents WHERE title = ANY($4)))
       AND tsv @@ q
     ORDER BY score DESC
     LIMIT $3
@@ -194,6 +196,7 @@ _TRIGRAM_SQL = """
     FROM chunks
     WHERE active = true
       AND ($2::text[] IS NULL OR manual_version = ANY($2))
+      AND ($4::text[] IS NULL OR doc_id NOT IN (SELECT id FROM documents WHERE title = ANY($4)))
       AND ui_labels <> ''
       AND similarity(ui_labels, $1) > 0.0
     ORDER BY score DESC
@@ -206,6 +209,7 @@ async def hybrid_search(
     query_text: str,
     query_vec: list[float],
     manual_versions: list[str] | None = None,
+    excluded_manuals: list[str] | None = None,
     k_vector: int = 50,
     k_bm25: int = 50,
     k_trigram: int = 30,
@@ -218,7 +222,11 @@ async def hybrid_search(
 
     manual_versions=None means "search all versions" (only sensible when
     one version is loaded). Pass a list to scope to specific versions.
+
+    excluded_manuals: manual titles to leave out (the restricted manuals for
+    an ordinary user, see app/rag/access.py). None or [] searches them all.
     """
+    excluded = excluded_manuals or None
     pool = await get_pool()
     async with pool.acquire() as conn:
         # Run the three queries concurrently. asyncpg pipelines them on the
@@ -228,13 +236,13 @@ async def hybrid_search(
         # comfortably under 100 ms on a small corpus, so concurrency adds
         # complexity without measurable benefit.
         vec_rows = await conn.fetch(
-            _VECTOR_SQL, query_vec, manual_versions, k_vector
+            _VECTOR_SQL, query_vec, manual_versions, k_vector, excluded
         )
         bm25_rows = await conn.fetch(
-            _BM25_SQL, query_text, manual_versions, k_bm25
+            _BM25_SQL, query_text, manual_versions, k_bm25, excluded
         )
         trgm_rows = await conn.fetch(
-            _TRIGRAM_SQL, query_text, manual_versions, k_trigram
+            _TRIGRAM_SQL, query_text, manual_versions, k_trigram, excluded
         )
 
     return {
@@ -313,6 +321,36 @@ async def find_procedure_in_module(module_key: str, title: str) -> dict[str, Any
         return None
     rows = await get_chunks_by_ids([chunk_id])
     return rows[0] if rows else None
+
+
+async def best_match_in_manuals(
+    query_vec: list[float], manuals: list[str]
+) -> tuple[str | None, float, str | None]:
+    """(manual, cosine similarity, chunk title) of the best vector match inside
+    these manuals, or (None, 0.0, None). Used to recognise questions about a
+    restricted manual (app/rag/access.py).
+
+    The HNSW index scans the nearest chunks overall and then applies the
+    manual filter, so a manual whose best chunk is far down the overall list
+    can return nothing — which is the right answer here: it was not the
+    question's best match.
+    """
+    if not manuals:
+        return None, 0.0, None
+    sql = """
+        SELECT d.title AS manual, c.title, 1.0 - (c.embedding <=> $1::vector) AS score
+        FROM chunks c
+        JOIN documents d ON d.id = c.doc_id
+        WHERE c.active = true
+          AND c.embedding IS NOT NULL
+          AND d.title = ANY($2)
+        ORDER BY c.embedding <=> $1::vector
+        LIMIT 1
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(sql, query_vec, manuals)
+    return (row["manual"], float(row["score"]), row["title"]) if row else (None, 0.0, None)
 
 
 async def list_document_titles() -> list[str]:
@@ -404,6 +442,99 @@ async def record_feedback(
     pool = await get_pool()
     async with pool.acquire() as conn:
         return await conn.fetchval(sql, message_id, rating, comment)
+
+
+# ---------------------------------------------------------------------------
+# Accounts (stakeholder item 5) — see app/auth.py and app/ui/admin.py
+# ---------------------------------------------------------------------------
+# Only scrypt hashes are stored; temporary and chosen passwords never reach the
+# database or the logs in clear text.
+
+_USER_COLUMNS = """username, full_name, role, password_hash, must_change_password, active,
+                   created_at, created_by, updated_at, updated_by, last_login_at"""
+
+
+async def get_app_user(username: str) -> dict[str, Any] | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(f"SELECT {_USER_COLUMNS} FROM app_users WHERE username = $1", username)
+    return dict(row) if row else None
+
+
+async def list_app_users() -> list[dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"SELECT {_USER_COLUMNS} FROM app_users ORDER BY active DESC, role DESC, username"
+        )
+    return [dict(r) for r in rows]
+
+
+async def create_app_user(
+    *, username: str, full_name: str, role: str, password_hash: str, created_by: str
+) -> bool:
+    """Insert a new account that must choose its own password at first login.
+    Returns False if the username is already taken."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        status = await conn.execute(
+            """
+            INSERT INTO app_users (username, full_name, role, password_hash, created_by, updated_by)
+            VALUES ($1, $2, $3, $4, $5, $5)
+            ON CONFLICT (username) DO NOTHING
+            """,
+            username, full_name, role, password_hash, created_by,
+        )
+    return status.endswith(" 1")
+
+
+async def set_app_user_password(username: str, password_hash: str, *, must_change: bool, by: str) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        status = await conn.execute(
+            """
+            UPDATE app_users
+               SET password_hash = $2, must_change_password = $3, updated_at = now(), updated_by = $4
+             WHERE username = $1
+            """,
+            username, password_hash, must_change, by,
+        )
+    return status.endswith(" 1")
+
+
+async def set_app_user_role(username: str, role: str, *, by: str) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        status = await conn.execute(
+            "UPDATE app_users SET role = $2, updated_at = now(), updated_by = $3 WHERE username = $1",
+            username, role, by,
+        )
+    return status.endswith(" 1")
+
+
+async def set_app_user_active(username: str, active: bool, *, by: str) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        status = await conn.execute(
+            "UPDATE app_users SET active = $2, updated_at = now(), updated_by = $3 WHERE username = $1",
+            username, active, by,
+        )
+    return status.endswith(" 1")
+
+
+async def touch_app_user_login(username: str) -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE app_users SET last_login_at = now() WHERE username = $1", username)
+
+
+async def delete_app_user(username: str) -> bool:
+    """Remove an account outright (command line only, for test accounts).
+    Real accounts are disabled instead, so the question log keeps its names."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        status = await conn.execute("DELETE FROM app_users WHERE username = $1", username)
+    return status.endswith(" 1")
 
 
 # ---------------------------------------------------------------------------

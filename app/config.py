@@ -63,13 +63,32 @@ class Settings(BaseSettings):
     # Set env PREFER_FULL_PROCEDURES=false to keep the raw ranking.
     prefer_full_procedures: bool = Field(default=True)
 
-    # Chainlit
+    # User roles (stakeholder item 5). Ordinary users get no answers from these
+    # manuals: searches skip them, and a question whose best match is in one of
+    # them gets a "limited to super users" reply (app/rag/access.py). Super
+    # users see everything and manage accounts at /admin.
+    # Env RESTRICTED_MODULES: manual titles, comma-separated.
+    restricted_modules: str = Field(
+        default="Human Resources Management Module,User and Facility Management Module"
+    )
+    # A question counts as being about a restricted task only if its best
+    # restricted match beats the best open match by at least this much
+    # (bge-m3 cosine). Below that, "leave" or "reset my password" is answered
+    # from the open manuals. Calibrated in RAG_modifications.md (M12).
+    restricted_gap: float = Field(default=0.03)
+
+    # Chainlit. CHAINLIT_AUTH_SECRET signs the login cookie; it is required
+    # once the login page is on. Generate one with: chainlit create-secret
     chainlit_auth_secret: str = Field(default="")
 
     # App
     app_log_level: str = Field(default="INFO")
     data_dir: Path = Field(default=Path("/data"))
     images_url_prefix: str = Field(default="/images")
+
+    @property
+    def restricted_manuals(self) -> list[str]:
+        return [m.strip() for m in self.restricted_modules.split(",") if m.strip()]
 
     @property
     def images_dir(self) -> Path:

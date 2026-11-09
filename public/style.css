@@ -121,3 +121,9 @@ blockquote.emr-caution .font-bold {
 .dark blockquote.emr-caution .font-bold {
     color: #FF6B6B !important;
 }
+
+/* Login page: the page itself explains a failed login, so hide Chainlit's
+   technical pop-up ("Unauthorized: credentialssignin"). */
+body:has(input[type="password"]) [data-sonner-toast] {
+    display: none !important;
+}

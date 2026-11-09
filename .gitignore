@@ -25,8 +25,10 @@ data/images/*
 # moved under their steps).
 data/knowledge_base_before_*/
 
-# Chainlit runtime files
-.chainlit/translations/
+# Chainlit runtime files. en-US.json is kept: it says "Username", not "Email
+# address", on the login page.
+.chainlit/translations/*
+!.chainlit/translations/en-US.json
 .files/
 
 # IDE / OS

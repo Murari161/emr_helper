@@ -50,67 +50,11 @@ CHAINLIT_AUTH_SECRET=
 
 …and paste the generated value after the `=`. Save the file.
 
-> **Why this is required:** Chainlit encrypts user sessions client-side with this secret. Without it the app container will crash on startup.
+> **Why this is required:** this secret signs the login cookie. Without it the app container will crash on startup. Changing it later logs everybody out.
 
 ---
 
-## 3. Generate a Caddy basic-auth password
-
-The reverse proxy (Caddy) protects the app with basic authentication. You decide the password; Caddy stores its bcrypt hash. **The hash lives in `.env`, never in `Caddyfile`** — so it's never committed.
-
-### Step 3a — Hash a password you'll remember
-
-Replace `demo123` with whatever password you want:
-
-```bash
-docker run --rm caddy:2-alpine caddy hash-password --plaintext "demo123"
-```
-
-You'll see output like:
-
-```
-$2a$14$EXxLgQ7Ld5LZ4tRzJq.eXuVxYwL9oP6rT8mN3nB2sFhGcDmK9pQwK
-```
-
-Copy the whole `$2a$14$...` string.
-
-### Step 3b — Paste the hash into `.env` *(with `$` escaping — important!)*
-
-Open `.env`. Find this line:
-
-```
-BASIC_AUTH_HASH=
-```
-
-Paste the hash after the `=`, **but double every `$` sign as `$$`**. This is required because docker-compose interprets `$X` inside `.env` values as a variable reference and will silently corrupt the hash.
-
-If `caddy hash-password` printed:
-
-```
-$2a$14$EXxLgQ7Ld5LZ4tRzJq.eXuVxYwL9oP6rT8mN3nB2sFhGcDmK9pQwK
-```
-
-then `.env` must contain:
-
-```
-BASIC_AUTH_HASH=$$2a$$14$$EXxLgQ7Ld5LZ4tRzJq.eXuVxYwL9oP6rT8mN3nB2sFhGcDmK9pQwK
-```
-
-(every `$` doubled, no surrounding quotes, no whitespace.)
-
-Save the file. Caddy collapses each `$$` back to `$` on the way in, and substitutes the resulting hash into the Caddyfile's `{$BASIC_AUTH_HASH}` placeholder at startup.
-
-> **Symptom if you forget to escape:** Caddy starts, basic-auth prompt appears, but no password ever works — and `docker compose exec caddy env | grep BASIC_AUTH_HASH` shows a hash with chunks missing. Fix: escape, then `docker compose up -d`.
-
-> **The plaintext (`demo123`) is what you type in the browser.** The hash is what Caddy stores. Both should stay out of git: `.env` is already in `.gitignore`.
-
-> **To add more users later** (e.g. nurses, doctors): the cleanest approach for v1 is to support multiple users via additional env vars (`BASIC_AUTH_HASH_NURSE`, etc.) and add a line per user in `caddy/Caddyfile`. The longer-term path is OIDC against the hospital's Active Directory — Phase 7+ work.
-
-> **To rotate the password**: regenerate the hash (step 3a), replace the value in `.env`, then `docker compose restart caddy`. No git commit required.
-
----
-
-## 4. Bring everything up
+## 3. Bring everything up
 
 ```bash
 docker compose up -d --build
@@ -138,6 +82,18 @@ If any container says `Restarting`, jump to [Troubleshooting](#troubleshooting).
 
 ---
 
+## 4. Create your first login
+
+Everyone logs in with their own account. The first account has to be a **super user**, created from the command line. After that, super users add everyone else on the `/admin` page.
+
+```bash
+docker compose exec app python -m scripts.users add admin --role super_user --name "Your Name"
+```
+
+It prints a **temporary password, once**. Keep it for the next step. (Only a scrambled hash is stored, so it cannot be looked up later. If you lose it, run `docker compose exec app python -m scripts.users reset admin`.)
+
+---
+
 ## 5. Open the app
 
 In your browser:
@@ -146,8 +102,8 @@ In your browser:
 http://localhost:8000
 ```
 
-1. Basic-auth prompt appears → username `admin`, password (the plaintext from step 3a).
-2. Chainlit welcome screen loads with the **eAFYA Assistant** greeting.
+1. The login page appears → enter the username and the temporary password from step 4.
+2. The **eAFYA Assistant** greeting loads and asks you to choose your own password. Click **Change your password**; the assistant answers questions once that is done.
 3. Type anything in the chat box — until Phase 5 is wired up, you'll get an echo response (`(echo) hello`). That confirms routing works.
 
 **That's Phase 1 verified.** Subsequent phases add the real retrieval and generation pipeline.
@@ -220,6 +176,26 @@ docker compose up -d   # without the -f docker-compose.gpu.yml
 The production hospital server doesn't use this overlay — `docker compose up -d`
 on its own is the canonical deploy command. The overlay file is dev-only.
 
+### Manage accounts
+
+Click the circle with your initial at the top right of the chat, then **Manage accounts** (super users only), or go to `http://localhost:8000/admin`. **Change your password** is in the same menu, for everyone.
+
+| To… | Do this |
+|---|---|
+| Add a person | **Add an account**, then give them the temporary password privately. It is shown once. |
+| Reset a forgotten password | **Reset password** gives a new temporary password. |
+| Change what someone can see | **Make super user** / **Make user**. Takes effect on their next question. |
+| Remove someone's access | **Disable**. Accounts are disabled, not deleted, so the question log keeps their names. |
+
+Ordinary users get no answers from the **Human Resources** and **User & Facility Management** manuals. To change that list, set `RESTRICTED_MODULES` in `.env` (see `.env.example`), then `docker compose up -d --force-recreate app`.
+
+If no super user can log in:
+
+```bash
+docker compose exec app python -m scripts.users list
+docker compose exec app python -m scripts.users reset <username>
+```
+
 ### Stop the stack
 ```bash
 docker compose down
@@ -264,23 +240,20 @@ docker compose exec db psql -U emr emr_helper   # psql against Postgres
 You didn't create `.env`, or you left `CHAINLIT_AUTH_SECRET=` empty. Go back to [step 2](#2-create-your-env-file).
 
 ### Caddy container is `Restarting` or browser shows a 502 / blank page
-Either the Caddyfile bcrypt hash is invalid, or you forgot to restart Caddy after editing it. Run:
+Either the Caddyfile has a mistake, or you forgot to restart Caddy after editing it. Run:
 
 ```bash
 docker compose logs caddy | tail -20
 docker compose restart caddy
 ```
 
-### Browser keeps asking for the password — nothing accepts
-Most common cause: you pasted the bcrypt hash into `.env` without escaping the `$` signs. docker-compose treats `$X` as a variable reference and silently strips portions of the hash. Verify with:
+### The login page refuses my password
+- After 5 wrong tries a username is locked for 15 minutes, even with the right password. Wait, or restart the app (`docker compose restart app`), which clears the lock.
+- Forgotten password: a super user clicks **Reset password** at `/admin`. If no super user can log in, see [Manage accounts](#manage-accounts).
+- A disabled account cannot log in. A super user can **Enable** it at `/admin`.
 
-```bash
-docker compose exec caddy env | grep BASIC_AUTH_HASH
-```
-
-If the output shows a hash with missing chunks (or warnings about *"variable is not set, defaulting to a blank string"*), edit `.env` and **double every `$`** as `$$`, then `docker compose up -d`. See [step 3b](#step-3b--paste-the-hash-into-env-with--escaping--important).
-
-Other possibilities: hash starts with something other than `$2a$14$`, has surrounding quotes, or was generated for a different password than the one you're typing. Re-do [step 3](#3-generate-a-caddy-basic-auth-password) and restart with `docker compose restart caddy`.
+### The login page says "Email address"
+The `.chainlit/translations/en-US.json` file is missing or out of date. Run `git checkout .chainlit/translations/en-US.json`, then refresh the page.
 
 ### Build fails: `Readme file does not exist: README.md`
 You modified the `Dockerfile` and broke the COPY order. The build needs `README.md` and `app/` present *before* the `uv pip install -e .` step runs. Restore the original Dockerfile from git: `git checkout Dockerfile`.
@@ -316,8 +289,8 @@ Try this in order:
 
 | Service | Where | What it does |
 |---|---|---|
-| **Caddy** | `localhost:8000` (public) | Basic auth, reverse proxy to the app |
-| **Chainlit app** | `app:8000` (internal) | Serves the chat UI |
+| **Caddy** | `localhost:8000` (public) | Reverse proxy to the app (HTTPS once there is a hostname) |
+| **Chainlit app** | `app:8000` (internal) | Serves the login page, the chat UI and the account pages |
 | **Postgres + pgvector** | `db:5432` (internal) | Stores chunks, conversations, audit log |
 | **Ollama** | `ollama:11434` (internal) | Hosts the embedding, reranker, and generation models |
 
@@ -332,6 +305,6 @@ Only Caddy is reachable from outside. The other three live on an internal Docker
 - **Phase 4:** Retrieval — hybrid vector + BM25 + trigram search.
 - **Phase 5:** Generation — replaces the Phase 1 echo with real answers from the manuals.
 - **Phase 6:** Eval harness + audit logging.
-- **Phase 7:** Production hardening — `restart: unless-stopped`, real TLS, OIDC instead of basic auth.
+- **Phase 7:** Production hardening — `restart: unless-stopped`, real TLS.
 
 See [`CLAUDE_CODE_PROMPT.md`](CLAUDE_CODE_PROMPT.md) in the parent directory for the full project specification.

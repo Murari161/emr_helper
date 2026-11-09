@@ -160,11 +160,34 @@ CREATE INDEX IF NOT EXISTS chunks_version_active
 
 
 -- ---------------------------------------------------------------------------
+-- app_users — one row per person who can log in (stakeholder item 5)
+-- ---------------------------------------------------------------------------
+-- role 'user' gets no answers from the restricted manuals; 'super_user' sees
+-- everything and manages accounts at /admin. Passwords are stored only as
+-- scrypt hashes (app/auth.py). Accounts are disabled, not deleted, so the
+-- question log keeps its names. A new or reset account must choose its own
+-- password at /account before asking questions.
+-- Databases created before this table existed get it from app/db/pool.py.
+CREATE TABLE IF NOT EXISTS app_users (
+    username              text PRIMARY KEY,
+    full_name             text NOT NULL DEFAULT '',
+    role                  text NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'super_user')),
+    password_hash         text NOT NULL,
+    must_change_password  boolean NOT NULL DEFAULT true,
+    active                boolean NOT NULL DEFAULT true,
+    created_at            timestamptz NOT NULL DEFAULT now(),
+    created_by            text,
+    updated_at            timestamptz NOT NULL DEFAULT now(),
+    updated_by            text,
+    last_login_at         timestamptz
+);
+
+
+-- ---------------------------------------------------------------------------
 -- conversations — one row per chat session
 -- ---------------------------------------------------------------------------
--- user_id is the value of the X-User header set by Caddy after basic auth
--- (or by an OIDC reverse proxy later). For local-only deployments without
--- auth, this column may be a constant like "anonymous".
+-- user_id is the username from the login page (app_users.username).
+-- Conversations from before logins existed carry "anonymous".
 CREATE TABLE IF NOT EXISTS conversations (
     id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id          text NOT NULL,

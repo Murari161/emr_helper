@@ -1,29 +1,21 @@
-# EMR Helper reverse proxy.
+# eAFYA Assistant reverse proxy.
 #
-# Phase 1: basic auth in front of the app. The user is added to the
-# `X-User` header so the app knows who is asking (without ever seeing
-# the password). Replace with OIDC in a later iteration.
-#
-# To generate a password hash:
-#   docker run --rm caddy:2-alpine caddy hash-password --plaintext 'your-password'
-# Then paste the hash (starts with `$2a$...`) into the basic_auth block below.
+# Caddy only forwards traffic (and provides HTTPS once there is a hostname).
+# Logins are handled by the app itself: one account per person, managed by
+# super users at /admin (app/auth.py, app/ui/admin.py).
 
 :8000 {
-	# Health check endpoint that bypasses auth so docker-compose can probe it.
+	# Health check endpoint so docker-compose can probe it.
 	@health path /healthz
 	respond @health "ok" 200
 
-	# Everything else requires basic auth. The hash is supplied via the
-	# BASIC_AUTH_HASH environment variable (read from .env at startup),
-	# so the bcrypt hash is never committed to git. See SETUP.md step 3.
-	basic_auth {
-		# Format:  <username>  <bcrypt-hash from env>
-		admin {$BASIC_AUTH_HASH}
-	}
-
-	# Pass the authenticated user to the app.
 	reverse_proxy app:8000 {
-		header_up X-User {http.auth.user.id}
+		# Drop idle connections to the app before the app does (it closes them
+		# after 5 s). Otherwise a form sent at that instant, such as a login,
+		# fails with a 502: Caddy cannot safely retry a POST.
+		transport http {
+			keepalive 2s
+		}
 		# Chainlit uses websockets for streaming.
 		header_up Host {host}
 		header_up X-Real-IP {remote_host}

@@ -87,6 +87,21 @@ _MIGRATIONS = (
     ) q ON true
     WHERE a.role = 'assistant'
     """,
+    """
+    CREATE TABLE IF NOT EXISTS app_users (
+        username              text PRIMARY KEY,
+        full_name             text NOT NULL DEFAULT '',
+        role                  text NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'super_user')),
+        password_hash         text NOT NULL,
+        must_change_password  boolean NOT NULL DEFAULT true,
+        active                boolean NOT NULL DEFAULT true,
+        created_at            timestamptz NOT NULL DEFAULT now(),
+        created_by            text,
+        updated_at            timestamptz NOT NULL DEFAULT now(),
+        updated_by            text,
+        last_login_at         timestamptz
+    )
+    """,
 )
 
 

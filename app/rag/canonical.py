@@ -55,12 +55,17 @@ def is_summary_of(chunk: dict[str, Any], full: dict[str, Any]) -> bool:
     return not (chunk.get("images") or []) and bool(full.get("images") or [])
 
 
-async def prefer_full_versions(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+async def prefer_full_versions(
+    chunks: list[dict[str, Any]], *, excluded_manuals: list[str] | None = None
+) -> list[dict[str, Any]]:
     """Replace each summary procedure in a ranked list with its full version.
 
     The full version takes the summary's position; if it was already in the
     list further down, that later copy is dropped. Order is otherwise kept.
+    A full version in an excluded manual (restricted for this user) is not
+    used; the summary stays.
     """
+    excluded = set(excluded_manuals or [])
     out: list[dict[str, Any]] = []
     seen: set[Any] = set()
     for chunk in chunks:
@@ -68,6 +73,8 @@ async def prefer_full_versions(chunks: list[dict[str, Any]]) -> list[dict[str, A
         if chunk.get("kind") == "procedure":
             for module in referenced_modules(chunk):
                 full = await queries.find_procedure_in_module(module, chunk.get("title") or "")
+                if full is not None and full.get("manual") in excluded:
+                    continue
                 if full is not None and is_summary_of(chunk, full):
                     log.info(
                         "  full version: %r — using the %s copy instead of the summary",
