@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Update the online server (askeafya.com) to the latest `main`, safely.
+# Update the online server (askeafya.chat) to the latest `main`, safely.
 #
 # Run by GitHub Actions after every push or merge to main (.github/workflows/
 # deploy.yml), through an SSH key that may run nothing but this script. Can

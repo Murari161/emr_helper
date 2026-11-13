@@ -240,7 +240,7 @@ docker compose exec db psql -U emr emr_helper   # psql against Postgres
 
 ---
 
-## Online server (askeafya.com)
+## Online server (askeafya.chat)
 
 The online trial runs this same Docker setup on a DigitalOcean server. Three things differ, all set in the server's `.env`: the answer model is hosted (Together AI), the site has a domain with automatic HTTPS, and it updates itself from GitHub. Buying the domain and creating the server are covered step by step in `EMR_Helper_Going_Online_Steps.html` in the project folder.
 
@@ -262,9 +262,9 @@ RERANKER_ENABLED=false
 GENERATION_PROVIDER=openai
 GENERATION_API_BASE=https://api.together.xyz/v1
 GENERATION_API_KEY=<the Together AI key>
-GENERATION_MODEL=meta-llama/Llama-3.2-3B-Instruct-Turbo
+GENERATION_MODEL=zai-org/GLM-5.3-Flash
 COMPOSE_FILE=docker-compose.yml:docker-compose.server.yml
-DOMAIN=askeafya.com
+DOMAIN=askeafya.chat
 ```
 
 From the laptop, in Git Bash, upload the manuals (the `[A-Z]` skips Word's `~$` temporary files):
@@ -282,9 +282,9 @@ docker compose exec app python -m scripts.ingest /data/knowledge_base/
 docker compose exec app python -m scripts.users add admin --role super_user
 ```
 
-Then open `https://askeafya.com`. The HTTPS certificate is created on the first visit, once the domain points at the server.
+Then open `https://askeafya.chat`. The HTTPS certificate is created on the first visit, once the domain points at the server.
 
-A second domain, such as `askeafya.chat`, can forward to the main one: set `OTHER_DOMAINS=askeafya.chat www.askeafya.chat` in `.env`, point its DNS at the same server, and run `docker compose up -d --force-recreate caddy`.
+A second domain, such as a later Ministry of Health address, can forward to the main one: set `OTHER_DOMAINS=<domain> www.<domain>` in `.env`, point its DNS at the same server, and run `docker compose up -d --force-recreate caddy`.
 
 ### Automatic updates
 
@@ -298,7 +298,7 @@ echo "command=\"bash /opt/askeafya/scripts/deploy.sh\",restrict $(cat /root/.ssh
 cat /root/.ssh/github_deploy
 ```
 
-Copy the whole private key that the last command prints, then delete it from the server with `rm /root/.ssh/github_deploy`. In GitHub, open the repository's **Settings → Secrets and variables → Actions** and add three secrets: `DEPLOY_HOST` (the server's IP), `DEPLOY_USER` (`root`) and `DEPLOY_SSH_KEY` (the private key). Then **Actions → Deploy to askeafya.com → Run workflow** should turn green.
+Copy the whole private key that the last command prints, then delete it from the server with `rm /root/.ssh/github_deploy`. In GitHub, open the repository's **Settings → Secrets and variables → Actions** and add three secrets: `DEPLOY_HOST` (the server's IP), `DEPLOY_USER` (`root`) and `DEPLOY_SSH_KEY` (the private key). Then **Actions → Deploy to askeafya.chat → Run workflow** should turn green.
 
 To update by hand, run `bash /opt/askeafya/scripts/deploy.sh` on the server. To undo a bad change, revert its commit on GitHub; the revert deploys like any other change.
 

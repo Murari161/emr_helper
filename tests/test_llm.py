@@ -148,6 +148,39 @@ def test_classifier_uses_the_hosted_model(monkeypatch) -> None:
     assert asyncio.run(classifier.classify_question("How many patients today?")) == "PATIENT_DATA"
 
 
+def test_hosted_model_gets_room_to_think(monkeypatch) -> None:
+    # GLM-5.3-Flash thinks before answering: at 800 tokens it cut off the
+    # registration answer, and at 6 it returned empty classifier labels.
+    hosted(monkeypatch)
+    seen = use_fake_server(monkeypatch, lambda r: httpx.Response(
+        200, content=sse("Steps") if json.loads(r.content)["stream"] else
+        json.dumps({"choices": [{"message": {"content": "OTHER"}}]}).encode()))
+    chunk = {"id": 1, "title": "Register a patient", "content": "Steps:\nClick.", "section_path": "S"}
+    asyncio.run(collect(generator.stream_answer("How do I register?", [chunk])))
+    asyncio.run(classifier.classify_question("What's the weather?"))
+    assert [json.loads(r.content)["max_tokens"] for r in seen] == [3000, 300]
+
+
+def test_local_model_limits_unchanged(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "generation_provider", "ollama")
+    seen = use_fake_server(monkeypatch, lambda r: httpx.Response(200, content=b'{"response": "OTHER", "done": true}'))
+    chunk = {"id": 1, "title": "Register a patient", "content": "Steps:\nClick.", "section_path": "S"}
+    asyncio.run(collect(generator.stream_answer("How do I register?", [chunk])))
+    asyncio.run(classifier.classify_question("What's the weather?"))
+    assert [json.loads(r.content)["options"]["num_predict"] for r in seen] == [800, 6]
+
+
+def test_thinking_is_not_shown(monkeypatch) -> None:
+    # The model's thinking arrives in a separate field and must never reach the user.
+    hosted(monkeypatch)
+    events = [{"choices": [{"delta": {"reasoning_content": "Let me think about the steps"}}]},
+              {"choices": [{"delta": {"content": "1. Click Save."}}]}]
+    body = ("\n\n".join(f"data: {json.dumps(e)}" for e in events) + "\n\ndata: [DONE]\n\n").encode()
+    use_fake_server(monkeypatch, lambda r: httpx.Response(200, content=body))
+    tokens = asyncio.run(collect(llm.stream_completion("S", "P", temperature=0.2, max_tokens=3000)))
+    assert "".join(tokens) == "1. Click Save."
+
+
 def test_classifier_falls_back_safely(monkeypatch) -> None:
     hosted(monkeypatch)
     use_fake_server(monkeypatch, lambda r: httpx.Response(503, text="overloaded"))

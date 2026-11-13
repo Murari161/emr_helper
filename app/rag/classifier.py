@@ -98,7 +98,8 @@ async def classify_question(query: str) -> str:
             ANSWER_SYSTEM_PROMPT,
             _CLASSIFY_PROMPT.format(question=query.strip()),
             temperature=0.0,
-            max_tokens=6,
+            # The hosted model thinks first; 6 tokens left it no room to reply.
+            max_tokens=llm.token_budget(local=6, hosted=300),
         )
     except Exception:
         log.exception("classify_question failed; using the Focal Person reply")

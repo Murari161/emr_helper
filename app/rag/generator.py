@@ -24,8 +24,10 @@ from app.rag.prompts import ANSWER_SYSTEM_PROMPT, build_user_prompt
 log = logging.getLogger(__name__)
 
 # Long answers tend to drift off-topic for a 3B model, and we want a
-# responsive chat.
+# responsive chat. The hosted model's limit includes its thinking, so it needs
+# more room for the same answer (app/rag/llm.py::token_budget).
 MAX_ANSWER_TOKENS = 800
+MAX_ANSWER_TOKENS_HOSTED = 3000
 
 
 async def stream_answer(
@@ -59,6 +61,6 @@ async def stream_answer(
         ANSWER_SYSTEM_PROMPT,
         build_user_prompt(query, chunks),
         temperature=temperature,
-        max_tokens=MAX_ANSWER_TOKENS,
+        max_tokens=llm.token_budget(local=MAX_ANSWER_TOKENS, hosted=MAX_ANSWER_TOKENS_HOSTED),
     ):
         yield token

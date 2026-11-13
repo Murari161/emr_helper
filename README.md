@@ -29,7 +29,7 @@ docker compose exec app python -m scripts.ingest /data/knowledge_base/
 
 > **Windows / Git Bash note:** `/data/knowledge_base/` is the path **inside the container**. Git Bash (MINGW) rewrites leading-`/` arguments into a Windows path, so ingest fails with `Path does not exist: C:/.../data/knowledge_base`. Either prefix with `MSYS_NO_PATHCONV=1` (e.g. `MSYS_NO_PATHCONV=1 docker compose exec app python -m scripts.ingest /data/knowledge_base/`) or run the command from **PowerShell / CMD**. See `SETUP.md` for details.
 
-The online trial (askeafya.com) runs the same setup on a cloud server with a hosted answer model and automatic updates from `main`; see **Online server** in `SETUP.md`.
+The online trial (askeafya.chat) runs the same setup on a cloud server with a hosted answer model and automatic updates from `main`; see **Online server** in `SETUP.md`.
 
 ## Architecture overview
 

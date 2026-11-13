@@ -1,4 +1,4 @@
-# Update the online server (askeafya.com) after every push or merge to main.
+# Update the online server (askeafya.chat) after every push or merge to main.
 #
 # Until the server exists and its secrets are set, this does nothing and
 # succeeds. Repository -> Settings -> Secrets and variables -> Actions:
@@ -8,7 +8,7 @@
 #                   run nothing but scripts/deploy.sh (see SETUP.md).
 # The server runs the unit tests itself and keeps the old version if they fail.
 
-name: Deploy to askeafya.com
+name: Deploy to askeafya.chat
 
 on:
   push:

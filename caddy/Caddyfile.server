@@ -1,4 +1,4 @@
-# Reverse proxy for the online server (askeafya.com), used through
+# Reverse proxy for the online server (askeafya.chat), used through
 # docker-compose.server.yml. Laptops and facilities use caddy/Caddyfile.
 #
 # Caddy gets and renews the HTTPS certificate on its own (Let's Encrypt) once
@@ -39,8 +39,8 @@
 	}
 }
 
-# www.askeafya.com, and any other domains listed in OTHER_DOMAINS (separated
-# by spaces, for example "askeafya.chat www.askeafya.chat"), go to the main
+# www.askeafya.chat, and any other domains listed in OTHER_DOMAINS (separated
+# by spaces, for example "example.org www.example.org"), go to the main
 # address. Each needs DNS records pointing at this server too.
 www.{$DOMAIN} {$OTHER_DOMAINS} {
 	redir https://{$DOMAIN}{uri} permanent

@@ -38,6 +38,19 @@ def provider() -> str:
     return name
 
 
+def token_budget(*, local: int, hosted: int) -> int:
+    """How long a reply may be, by provider.
+
+    The hosted model on the online server (GLM-5.3-Flash on Together AI) thinks
+    before it answers, and its thinking counts towards the limit. Measured: an
+    800-token limit cut off the registration answer at step 14 of 18 and
+    returned empty labels to the classifier; with room to think, every answer
+    was complete and all 6 labels were right. The local model does not think,
+    so its limits stay as they were.
+    """
+    return hosted if provider() == OPENAI else local
+
+
 def ollama_payload(system: str, prompt: str, *, temperature: float, max_tokens: int, stream: bool) -> dict[str, Any]:
     return {
         "model": settings.generation_model,

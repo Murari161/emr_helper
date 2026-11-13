@@ -1,8 +1,8 @@
-# Additions for the online server (askeafya.com). Not used on laptops or at
+# Additions for the online server (askeafya.chat). Not used on laptops or at
 # facilities. The server's .env switches it on with:
 #
 #   COMPOSE_FILE=docker-compose.yml:docker-compose.server.yml
-#   DOMAIN=askeafya.com
+#   DOMAIN=askeafya.chat
 #
 # so plain `docker compose ...` commands use both files there.
 
@@ -13,7 +13,7 @@ services:
       - "443:443"       # HTTPS
       - "443:443/udp"   # HTTP/3
     environment:
-      DOMAIN: ${DOMAIN:?Set DOMAIN in .env, for example DOMAIN=askeafya.com}
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env, for example DOMAIN=askeafya.chat}
       # Optional: more domains that forward to DOMAIN, separated by spaces.
       OTHER_DOMAINS: ${OTHER_DOMAINS:-}
     volumes:

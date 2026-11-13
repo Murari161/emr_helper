@@ -437,8 +437,8 @@ tests/test_admin.py -v`; log in as an ordinary user and ask "How do I create a u
 ## M13 — Going online, and facility installations without logins (✅ done 2026-11)
 **Status:** ✅ built and tested locally; first deployment pending the server (going-online guide,
 phases 4 to 7).
-**Decisions (project lead):** the online trial runs at askeafya.com for two weeks on a DigitalOcean
-server, with the answer model hosted by Together AI (Llama 3.2 3B) and logins for everyone,
+**Decisions (project lead):** the online trial runs at askeafya.chat (the only domain bought) on a DigitalOcean server
+(budgeted for 4 weeks), with the answer model hosted by Together AI and logins for everyone,
 because anyone with the address can reach it. Facility installations keep the local model and
 drop the login for normal users; super users still log in. Netlify was ruled out: the assistant
 needs an always-on server with its database, search model and live chat connections.
@@ -463,6 +463,15 @@ classifier, a missing key); Caddy's server configuration with and without a seco
 merged Docker configuration; facility mode in the browser (guest chat with no login page, a
 restricted question refused, the guest menu showing only "Super user login", super-user login,
 Logout back to guest); the laptop switched back to logins afterwards. 242 unit tests pass.
-**Not yet tested:** Together AI itself (needs the key), the HTTPS certificate and the GitHub
-deployment (need the server and domain).
+**Hosted model:** Together AI no longer offers any Llama model pay-per-use (checked with the
+project's key, 13 Nov 2026), so the trial uses **GLM-5.3-Flash**, chosen by the project lead. On
+real questions its answers were correct and formatted like ours, with first words in 2–4 s; it
+is stronger than the facilities' Llama 3.2 3B, so stakeholders should expect better and faster
+answers than at facilities. It thinks before answering, and the thinking counts towards the
+reply limit: at 800 tokens it cut off the registration answer at step 14 of 18, and at 6 the
+classifier got empty labels (0/6). `llm.token_budget` gives the hosted model 3000 and 300
+(complete answers; 6/6 labels); the local model keeps 800 and 6. Its thinking arrives in a
+separate field and is never shown. Rejected: Qwen3.5-9B (returned nothing); gpt-oss-120b also
+worked and is the fallback.
+**Not yet tested:** the HTTPS certificate and the GitHub deployment (need the server and domain).
 **Validation:** `docker compose exec app pytest tests/test_llm.py tests/test_admin.py -v`.

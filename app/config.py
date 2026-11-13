@@ -52,8 +52,8 @@ class Settings(BaseSettings):
     #   ollama  the local model on this computer: laptop and facilities
     #   openai  any OpenAI-compatible API, e.g. Together AI for the online
     #           trial. Set GENERATION_API_KEY, and GENERATION_MODEL to the
-    #           provider's name for the model
-    #           (Together AI: meta-llama/Llama-3.2-3B-Instruct-Turbo).
+    #           provider's name for the model (Together AI: zai-org/GLM-5.3-Flash;
+    #           it no longer offers Llama pay-per-use).
     # Search always stays local (bge-m3 on Ollama), whichever is chosen.
     generation_provider: str = Field(default="ollama")
     generation_api_base: str = Field(default="https://api.together.xyz/v1")
