@@ -31,6 +31,7 @@ What each test catches:
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
@@ -87,6 +88,9 @@ class FakeDB:
             return False
         self.users[username]["active"] = active
         return True
+
+    async def touch_app_user_login(self, username) -> None:
+        self.users[username]["last_login_at"] = "now"
 
 
 class Site:
@@ -320,6 +324,85 @@ def test_login_required_wrapper(site: Site) -> None:
     assert client.get("/images/a.png").status_code == 401
     site.me = "jane"
     assert client.get("/images/a.png").text == "screenshot"
+
+
+# --- facility installations (LOGIN_REQUIRED=false) ------------------------------
+
+@pytest.fixture
+def facility(monkeypatch, site: Site) -> Site:
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "login_required", False)
+    monkeypatch.setenv("CHAINLIT_AUTH_SECRET", "test-secret-test-secret-test-secret-test-secret")
+    return site
+
+
+def test_login_page_only_exists_at_facilities(site: Site) -> None:
+    r = site.client.get("/account/login")
+    assert r.status_code == 303 and r.headers["location"] == "/login"     # online: Chainlit's login page
+
+
+def test_facility_pages_send_strangers_to_the_super_user_login(facility: Site) -> None:
+    assert facility.client.get("/admin").headers["location"] == "/account/login"
+    assert facility.client.get("/account").headers["location"] == "/account/login"
+
+
+def test_guest_is_told_who_they_are(facility: Site) -> None:
+    facility.me = auth.GUEST
+    r = facility.client.get("/account/me")
+    assert r.json() == {"username": auth.GUEST, "role": auth.USER, "guest": True}
+    assert facility.client.get("/admin").status_code == 303            # a guest is not a super user
+
+
+def test_super_user_login_sets_the_staff_cookie(facility: Site) -> None:
+    facility.db.add("boss", role=auth.SUPER_USER, password="right-password")
+    page = facility.client.get("/account/login")
+    assert page.status_code == 200 and "For super users" in page.text
+    facility.client.cookies.set("access_token", "the-guest-session")     # every visitor is a guest first
+    r = facility.client.post("/account/login", data={"username": " BOSS ", "password": "right-password"})
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    cookies = r.headers.get_list("set-cookie")
+    staff = next(c for c in cookies if c.startswith(admin.STAFF_COOKIE + "="))
+    assert "httponly" in staff.lower() and "samesite=lax" in staff.lower()
+    assert admin.staff_username(staff.split(";")[0]) == "boss"
+    assert any(c.startswith("access_token=") for c in cookies)              # the chat signs in again
+
+
+def test_super_user_login_refusals(facility: Site, monkeypatch) -> None:
+    monkeypatch.setattr(auth, "login_guard", auth.LoginGuard())
+    facility.db.add("boss", role=auth.SUPER_USER, password="right-password")
+    facility.db.add("gone", role=auth.SUPER_USER, password="right-password", active=False)
+    for user, password in [("boss", "wrong"), ("nobody", "right-password"), ("gone", "right-password")]:
+        r = facility.client.post("/account/login", data={"username": user, "password": password})
+        assert r.status_code == 400 and "Sign in failed" in r.text
+        assert not any(c.startswith(admin.STAFF_COOKIE + "=") for c in r.headers.get_list("set-cookie"))
+    other = facility.client.post("/account/login", data={"username": "boss", "password": "right-password"},
+                                 headers={"origin": "https://evil.example"})
+    assert other.status_code == 403
+
+
+def test_super_user_login_locks_after_five_wrong_tries(facility: Site, monkeypatch) -> None:
+    monkeypatch.setattr(auth, "login_guard", auth.LoginGuard())
+    facility.db.add("boss", role=auth.SUPER_USER, password="right-password")
+    for _ in range(5):
+        facility.client.post("/account/login", data={"username": "boss", "password": "wrong"})
+    r = facility.client.post("/account/login", data={"username": "boss", "password": "right-password"})
+    assert r.status_code == 400
+
+
+def test_staff_cookie_is_read_and_checked(facility: Site) -> None:
+    from chainlit.auth.jwt import create_jwt
+    from chainlit.user import User
+
+    token = create_jwt(User(identifier="boss"))
+    header = f"theme=dark; {admin.STAFF_COOKIE}={token}; other=1"
+    assert admin.staff_username(header) == "boss"
+    assert admin.staff_username(f"{admin.STAFF_COOKIE}=forged.token.value") is None
+    assert admin.staff_username(None) is None and admin.staff_username("theme=dark") is None
+    facility.db.add("boss", role=auth.SUPER_USER)
+    assert asyncio.run(admin.staff_account(header))["username"] == "boss"
+    facility.db.users["boss"]["active"] = False                             # disabled: back to guest
+    assert asyncio.run(admin.staff_account(header)) is None
 
 
 def test_session_username_without_or_with_a_bad_cookie(monkeypatch) -> None:

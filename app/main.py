@@ -104,15 +104,17 @@ admin.register(_server_app)
 # One login per person, checked against app_users. Caddy no longer asks for a
 # password (its pop-up login could not tell people apart); it only provides
 # HTTPS. Repeated wrong passwords lock the username for a while (auth.LoginGuard).
+#
+# LOGIN_REQUIRED=false (facility installations): there is no login page. The
+# chat lets everyone in as "guest", with the ordinary user's limits, through
+# Chainlit's header login; a super user who has logged in at /account/login is
+# recognised by their staff cookie (app/ui/admin.py). Logging out clears it.
 # ---------------------------------------------------------------------------
 
-_login_guard = auth.LoginGuard()
 
-
-@cl.password_auth_callback
 async def password_login(username: str, password: str) -> cl.User | None:
     name = auth.normalise_username(username)
-    if _login_guard.is_locked(name):
+    if auth.login_guard.is_locked(name):
         log.warning("login refused: %r is locked after repeated wrong passwords", name)
         return None
     try:
@@ -123,10 +125,10 @@ async def password_login(username: str, password: str) -> cl.User | None:
     # A wrong username costs the same time as a wrong password.
     ok = auth.verify_password(password, account["password_hash"] if account else auth.DUMMY_HASH)
     if not (ok and account and account["active"]):
-        _login_guard.failed(name)
+        auth.login_guard.failed(name)
         log.info("login failed for %r", name)
         return None
-    _login_guard.succeeded(name)
+    auth.login_guard.succeeded(name)
     try:
         await queries.touch_app_user_login(name)
     except Exception:
@@ -135,11 +137,40 @@ async def password_login(username: str, password: str) -> cl.User | None:
     return cl.User(identifier=name, display_name=account["full_name"] or name, metadata={"role": account["role"]})
 
 
+async def open_access(headers: Any) -> cl.User:
+    """Facility installation: a super user with a staff cookie, else a guest."""
+    try:
+        account = await admin.staff_account(headers.get("cookie"))
+    except Exception:
+        log.exception("open access: could not read the staff login; continuing as a guest")
+        account = None
+    if account:
+        return cl.User(identifier=account["username"], display_name=account["full_name"] or account["username"],
+                       metadata={"role": account["role"]})
+    return cl.User(identifier=auth.GUEST, display_name="Guest", metadata={"role": auth.USER})
+
+
+async def forget_staff_login(request: Any, response: Any) -> dict[str, bool]:
+    """Logging out at a facility installation also ends the super-user login."""
+    admin.clear_staff_cookie(response)
+    return {"success": True}
+
+
+if settings.login_required:
+    cl.password_auth_callback(password_login)
+else:
+    cl.header_auth_callback(open_access)
+    cl.on_logout(forget_staff_login)
+    log.info("LOGIN_REQUIRED=false: no login for normal users; super users log in at /account/login")
+
+
 async def _current_account() -> dict[str, Any] | None:
     """The logged-in account, read fresh from the database (None if unknown)."""
     user = cl.user_session.get("user")
     if not isinstance(user, cl.User):
         return None
+    if user.identifier == auth.GUEST and not settings.login_required:
+        return dict(access.GUEST_ACCOUNT)
     try:
         return await queries.get_app_user(user.identifier)
     except Exception:

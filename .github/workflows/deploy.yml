@@ -1,0 +1,45 @@
+# Update the online server (askeafya.com) after every push or merge to main.
+#
+# Until the server exists and its secrets are set, this does nothing and
+# succeeds. Repository -> Settings -> Secrets and variables -> Actions:
+#   DEPLOY_HOST     the server's IP address
+#   DEPLOY_USER     the login on the server (root on a new droplet)
+#   DEPLOY_SSH_KEY  the private deploy key. On the server, its public half may
+#                   run nothing but scripts/deploy.sh (see SETUP.md).
+# The server runs the unit tests itself and keeps the old version if they fail.
+
+name: Deploy to askeafya.com
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Update the server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "No server set up yet (the DEPLOY_HOST or DEPLOY_SSH_KEY secret is empty). Nothing to do."
+            exit 0
+          fi
+          install -m 600 /dev/null ~/deploy_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/deploy_key
+          ssh -T -i ~/deploy_key \
+              -o StrictHostKeyChecking=accept-new \
+              -o ServerAliveInterval=30 \
+              "${DEPLOY_USER:-root}@${DEPLOY_HOST}" deploy

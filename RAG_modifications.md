@@ -427,6 +427,42 @@ extra lookup takes about 0.01 s.
 **Limits:** some restricted wordings get an open answer instead of the refusal: "reset a user's
 password" gets resetting your own (not a leak, but not what was asked). The lock is per app
 process, so a restart clears it. Password changes do not end sessions already logged in.
-**Before going online:** set `allow_origins` in `.chainlit/config.toml` to the real hostname.
+**Before going online:** done in M13. Chainlit's `allow_origins` cannot be set per installation, so
+on the server Caddy refuses requests from other websites instead.
 **Validation:** `docker compose exec app pytest tests/test_auth.py tests/test_access.py
 tests/test_admin.py -v`; log in as an ordinary user and ask "How do I create a user account?".
+
+---
+
+## M13 — Going online, and facility installations without logins (✅ done 2026-11)
+**Status:** ✅ built and tested locally; first deployment pending the server (going-online guide,
+phases 4 to 7).
+**Decisions (project lead):** the online trial runs at askeafya.com for two weeks on a DigitalOcean
+server, with the answer model hosted by Together AI (Llama 3.2 3B) and logins for everyone,
+because anyone with the address can reach it. Facility installations keep the local model and
+drop the login for normal users; super users still log in. Netlify was ruled out: the assistant
+needs an always-on server with its database, search model and live chat connections.
+**Where:** `app/rag/llm.py` (local or hosted answer model), `docker-compose.server.yml` and
+`caddy/Caddyfile.server` (domain, HTTPS), `scripts/deploy.sh` and `.github/workflows/deploy.yml`
+(automatic updates), `app/main.py` and `app/ui/admin.py` (facility mode), `SETUP.md`.
+**What:**
+  1. `GENERATION_PROVIDER=openai` sends the answer and the classifier's label request to any
+     OpenAI-compatible API (Together AI). Search embeddings stay local. The key is only sent in
+     the request header and never logged; without a key the server says so plainly.
+  2. On the server, Caddy serves the domain with automatic HTTPS, forwards `www` and any
+     `OTHER_DOMAINS` to it, tells browsers to always use HTTPS, and refuses requests sent by
+     pages on other websites (Chainlit's `allow_origins` cannot be set per installation).
+  3. Every push to `main` updates the server: GitHub logs in with a key that may run only
+     `scripts/deploy.sh`, which rebuilds, runs the unit tests on the server, and restarts only
+     if they pass. Until the server's secrets exist, the workflow does nothing and succeeds.
+  4. `LOGIN_REQUIRED=false` (facilities): everyone is let in as `guest` with the ordinary user's
+     limits, through Chainlit's header login; super users log in at `/account/login`, which sets
+     a signed staff cookie; Logout clears it. The username `guest` is reserved.
+**Tested:** both answer paths against Ollama's OpenAI-compatible endpoint (streaming, the
+classifier, a missing key); Caddy's server configuration with and without a second domain; the
+merged Docker configuration; facility mode in the browser (guest chat with no login page, a
+restricted question refused, the guest menu showing only "Super user login", super-user login,
+Logout back to guest); the laptop switched back to logins afterwards. 242 unit tests pass.
+**Not yet tested:** Together AI itself (needs the key), the HTTPS certificate and the GitHub
+deployment (need the server and domain).
+**Validation:** `docker compose exec app pytest tests/test_llm.py tests/test_admin.py -v`.

@@ -13,6 +13,11 @@ show a temporary password.
 
 Also here: LoginRequired, which keeps the manual screenshots (/images) behind
 the login now that the browser pop-up login is gone.
+
+Facility installations without logins (LOGIN_REQUIRED=false): everyone is let
+into the chat as "guest" (app/main.py), and super users log in at
+/account/login instead of Chainlit's login page. A signed cookie, STAFF_COOKIE,
+then tells the chat who they are.
 """
 from __future__ import annotations
 
@@ -22,12 +27,15 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import quote, urlparse
 
-from chainlit.auth.cookie import get_token_from_cookies
-from chainlit.auth.jwt import decode_jwt
+from chainlit.auth.cookie import clear_auth_cookie, get_token_from_cookies
+from chainlit.auth.jwt import create_jwt, decode_jwt
+from chainlit.config import config as chainlit_config
+from chainlit.user import User
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
 from app import auth
+from app.config import settings
 from app.db import queries
 
 log = logging.getLogger(__name__)
@@ -56,6 +64,48 @@ async def _account(request: Request) -> dict[str, Any] | None:
         return None
     account = await queries.get_app_user(name)
     return account if account and account["active"] else None
+
+
+# --- facility installations: super-user login ---------------------------------
+
+STAFF_COOKIE = "emr_staff"
+
+
+def staff_username(raw_cookie_header: str | None) -> str | None:
+    """The username in a valid staff cookie, read from a raw Cookie header."""
+    for part in (raw_cookie_header or "").split(";"):
+        name, _, value = part.strip().partition("=")
+        if name == STAFF_COOKIE and value:
+            try:
+                return decode_jwt(value).identifier
+            except Exception:
+                return None
+    return None
+
+
+async def staff_account(raw_cookie_header: str | None) -> dict[str, Any] | None:
+    """The active account a staff cookie belongs to, read fresh, or None."""
+    name = staff_username(raw_cookie_header)
+    if not name:
+        return None
+    account = await queries.get_app_user(name)
+    return account if account and account["active"] else None
+
+
+def set_staff_cookie(request: Request, response: Response, username: str) -> None:
+    response.set_cookie(
+        STAFF_COOKIE,
+        create_jwt(User(identifier=username)),
+        max_age=chainlit_config.project.user_session_timeout,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=request.headers.get("x-forwarded-proto") == "https" or request.url.scheme == "https",
+    )
+
+
+def clear_staff_cookie(response: Response) -> None:
+    response.delete_cookie(STAFF_COOKIE, path="/")
 
 
 def _same_origin(request: Request) -> bool:
@@ -156,7 +206,63 @@ def _msg(text: str, kind: str = "ok") -> str:
 
 
 def _login_redirect() -> Response:
-    return RedirectResponse("/login", status_code=303)
+    """Chainlit's login page, or the super-user login at a facility installation."""
+    return RedirectResponse("/login" if settings.login_required else "/account/login", status_code=303)
+
+
+# --- /account/login: super users at a facility installation ---------------------
+
+_LOGIN_FAILED = (
+    "Sign in failed. Check your username and password. "
+    "After 5 wrong tries the account is locked for 15 minutes."
+)
+
+
+def _staff_login_form(error: str = "") -> str:
+    return f"""{_msg(_e(error), "err") if error else ""}
+<div class="card"><p>For super users. Everyone else can use the assistant without logging in.</p>
+<form method="post" action="/account/login">
+<label for="username">Username</label>
+<input id="username" name="username" required maxlength="40" autocomplete="username">
+<label for="password">Password</label>
+<input id="password" name="password" type="password" required autocomplete="current-password">
+<button type="submit">Log in</button></form></div>"""
+
+
+@router.get("/account/login")
+async def staff_login_page(request: Request) -> Response:
+    if settings.login_required:
+        return RedirectResponse("/login", status_code=303)       # Chainlit's own login page
+    return _page("Super user login", _staff_login_form(), None)
+
+
+@router.post("/account/login")
+async def staff_login(request: Request) -> Response:
+    if settings.login_required:
+        return RedirectResponse("/login", status_code=303)
+    if not _same_origin(request):
+        return _page("Super user login", _msg("This form must be sent from the eAFYA Assistant itself.", "err"),
+                     None, 403)
+    form = await request.form()
+    name = auth.normalise_username(str(form.get("username") or ""))
+    password = str(form.get("password") or "")
+    if auth.login_guard.is_locked(name):
+        log.warning("staff login refused: %r is locked after repeated wrong passwords", name)
+        return _page("Super user login", _staff_login_form(_LOGIN_FAILED), None, 400)
+    account = await queries.get_app_user(name)
+    # A wrong username costs the same time as a wrong password.
+    ok = auth.verify_password(password, account["password_hash"] if account else auth.DUMMY_HASH)
+    if not (ok and account and account["active"]):
+        auth.login_guard.failed(name)
+        log.info("staff login failed for %r", name)
+        return _page("Super user login", _staff_login_form(_LOGIN_FAILED), None, 400)
+    auth.login_guard.succeeded(name)
+    await queries.touch_app_user_login(name)
+    log.info("staff login: %r (%s)", name, account["role"])
+    response = RedirectResponse("/", status_code=303)
+    set_staff_cookie(request, response, name)
+    clear_auth_cookie(request, response)     # the chat signs in again, now as this user
+    return response
 
 
 # --- /account: choose your own password ----------------------------------------
@@ -188,6 +294,8 @@ async def who_am_i(request: Request) -> Response:
     no_store = {"Cache-Control": "no-store"}
     account = await _account(request)
     if not account:
+        if not settings.login_required and session_username(request) == auth.GUEST:
+            return JSONResponse({"username": auth.GUEST, "role": auth.USER, "guest": True}, headers=no_store)
         return JSONResponse({"detail": "Not logged in"}, status_code=401, headers=no_store)
     return JSONResponse({"username": account["username"], "role": account["role"]}, headers=no_store)
 

@@ -73,6 +73,16 @@ def test_bad_usernames(name: str) -> None:
     assert auth.username_problem(name) is not None
 
 
+def test_guest_is_reserved() -> None:
+    # At a facility installation everyone without a login is "guest"; a real
+    # account of that name would inherit their sessions.
+    assert "reserved" in auth.username_problem(auth.GUEST)
+
+
+def test_one_lock_for_every_login() -> None:
+    assert isinstance(auth.login_guard, auth.LoginGuard)
+
+
 def test_password_rules() -> None:
     assert auth.password_problem("jane", "longenough", "different1") is not None     # must match
     assert auth.password_problem("jane", "short", "short") is not None               # too short

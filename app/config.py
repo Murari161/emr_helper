@@ -48,6 +48,24 @@ class Settings(BaseSettings):
     # low-RAM / CPU-only deployments (e.g. an 8GB facility laptop).
     reranker_enabled: bool = Field(default=True)
 
+    # Which model writes the answers (app/rag/llm.py):
+    #   ollama  the local model on this computer: laptop and facilities
+    #   openai  any OpenAI-compatible API, e.g. Together AI for the online
+    #           trial. Set GENERATION_API_KEY, and GENERATION_MODEL to the
+    #           provider's name for the model
+    #           (Together AI: meta-llama/Llama-3.2-3B-Instruct-Turbo).
+    # Search always stays local (bge-m3 on Ollama), whichever is chosen.
+    generation_provider: str = Field(default="ollama")
+    generation_api_base: str = Field(default="https://api.together.xyz/v1")
+    generation_api_key: str = Field(default="")
+
+    # Logins. True (the default): everyone logs in, as on the online trial,
+    # which anyone with the address can reach. False: a facility installation;
+    # normal users use the assistant without logging in, and only super users
+    # log in, at /account/login. Only safe while the computer cannot be
+    # reached from the internet.
+    login_required: bool = Field(default=True)
+
     # Retrieval match strength. A question is answered from the manuals only
     # if its best match clears ONE of these; otherwise it gets a fixed
     # "not covered / off-topic" reply (see app/rag/fallback.py). Calibrated on

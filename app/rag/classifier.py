@@ -14,15 +14,16 @@ removes the penalty (15.8 s) at no cost in accuracy (32/33 on held-out prompts).
 Other approach tried and dropped: nearest-exemplar classification on the
 question's bge-m3 embedding. Free at query time, but only 28/34, and its
 mistakes crossed the safety categories (clinical <-> patient data).
+
+The call goes to whichever model writes the answers (app/rag/llm.py); the
+shared prefix only matters for the local model.
 """
 from __future__ import annotations
 
 import logging
 import re
 
-import httpx
-
-from app.config import settings
+from app.rag import llm
 from app.rag.prompts import ANSWER_SYSTEM_PROMPT
 
 log = logging.getLogger(__name__)
@@ -92,18 +93,13 @@ async def classify_question(query: str) -> str:
     if _ABOUT_RE.search(query):
         return ASSISTANT
 
-    payload = {
-        "model": settings.generation_model,
-        "system": ANSWER_SYSTEM_PROMPT,
-        "prompt": _CLASSIFY_PROMPT.format(question=query.strip()),
-        "stream": False,
-        "options": {"temperature": 0.0, "num_predict": 6},
-    }
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(f"{settings.ollama_base_url}/api/generate", json=payload)
-            resp.raise_for_status()
-            raw = resp.json().get("response", "")
+        raw = await llm.complete(
+            ANSWER_SYSTEM_PROMPT,
+            _CLASSIFY_PROMPT.format(question=query.strip()),
+            temperature=0.0,
+            max_tokens=6,
+        )
     except Exception:
         log.exception("classify_question failed; using the Focal Person reply")
         return SAFE_LABEL

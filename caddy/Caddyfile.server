@@ -1,0 +1,47 @@
+# Reverse proxy for the online server (askeafya.com), used through
+# docker-compose.server.yml. Laptops and facilities use caddy/Caddyfile.
+#
+# Caddy gets and renews the HTTPS certificate on its own (Let's Encrypt) once
+# the domain points at this server, and forwards plain HTTP to HTTPS.
+
+{$DOMAIN} {
+	# Health check endpoint so docker-compose can probe it.
+	@health path /healthz
+	respond @health "ok" 200
+
+	# Browsers: always use the secure address for this site.
+	header Strict-Transport-Security "max-age=31536000"
+
+	# Refuse requests sent by pages on other websites. Browsers mark them with
+	# an Origin header; the assistant's own pages send its own address.
+	@other_site {
+		header Origin *
+		not header Origin https://{$DOMAIN}
+	}
+	respond @other_site "Forbidden" 403
+
+	reverse_proxy app:8000 {
+		# Drop idle connections to the app before the app does (it closes them
+		# after 5 s). Otherwise a form sent at that instant, such as a login,
+		# fails with a 502: Caddy cannot safely retry a POST.
+		transport http {
+			keepalive 2s
+		}
+		# Chainlit uses websockets for streaming. Caddy also passes on
+		# X-Forwarded-For and X-Forwarded-Proto by itself.
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
+
+# www.askeafya.com, and any other domains listed in OTHER_DOMAINS (separated
+# by spaces, for example "askeafya.chat www.askeafya.chat"), go to the main
+# address. Each needs DNS records pointing at this server too.
+www.{$DOMAIN} {$OTHER_DOMAINS} {
+	redir https://{$DOMAIN}{uri} permanent
+}

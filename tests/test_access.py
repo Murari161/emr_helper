@@ -104,6 +104,13 @@ def test_account_block_reply() -> None:
     assert access.account_block_reply({"active": False, "must_change_password": True}) == access.ACCOUNT_DISABLED_REPLY
 
 
+def test_guest_is_an_ordinary_user_who_can_ask() -> None:
+    guest = access.GUEST_ACCOUNT
+    assert guest["username"] == auth.GUEST and guest["role"] == auth.USER
+    assert access.account_block_reply(guest) is None
+    assert access.excluded_manuals(guest["role"], RESTRICTED) == RESTRICTED
+
+
 def test_visible_modules() -> None:
     modules = ["Billing Module", HR, UF]
     assert access.visible_modules(modules, RESTRICTED) == (["Billing Module"], [HR, UF])

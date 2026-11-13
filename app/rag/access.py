@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable
 
-from app.auth import SUPER_USER
+from app.auth import GUEST, SUPER_USER, USER
 from app.rag import fallback
 
 RESTRICTED = "restricted"          # outcome logged in messages.outcome
@@ -40,6 +40,15 @@ RESTRICTED_MODULES_LINE = (
 
 
 ACCOUNT = "account"                # outcome: a question refused because of the account
+
+# Everyone at a facility installation who has not logged in (LOGIN_REQUIRED=false).
+GUEST_ACCOUNT: dict[str, Any] = {
+    "username": GUEST,
+    "full_name": "Guest",
+    "role": USER,
+    "active": True,
+    "must_change_password": False,
+}
 
 CHANGE_PASSWORD_REPLY = (
     "🔑 Before you start, please choose your own password: "

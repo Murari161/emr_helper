@@ -25,6 +25,12 @@ SUPER_USER = "super_user"
 ROLES = (USER, SUPER_USER)
 ROLE_LABELS = {USER: "User", SUPER_USER: "Super user"}
 
+# At a facility installation without logins (LOGIN_REQUIRED=false), everyone
+# who has not logged in uses the assistant under this name, with the
+# ordinary user's limits. No real account may take it.
+GUEST = "guest"
+RESERVED_USERNAMES = frozenset({GUEST})
+
 MIN_PASSWORD_LENGTH = 8
 _USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,39}$")
 
@@ -81,6 +87,8 @@ def username_problem(username: str) -> str | None:
     if not _USERNAME_RE.match(username):
         return ("Usernames are 3 to 40 characters: lower-case letters, numbers, "
                 "and . _ - (starting with a letter or number).")
+    if username in RESERVED_USERNAMES:
+        return f"The username {username!r} is reserved. Please choose another."
     return None
 
 
@@ -136,3 +144,8 @@ class LoginGuard:
 
     def succeeded(self, username: str) -> None:
         self._failures.pop(username, None)
+
+
+# One lock for every way of logging in: Chainlit's login page and, at a
+# facility installation, the super-user login at /account/login.
+login_guard = LoginGuard()

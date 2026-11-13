@@ -53,14 +53,30 @@
 
   // --- Account links in the user menu (the circle at the top right) ---------
   // Chainlit has no setting for adding items to this menu, so they are added
-  // here when it opens, just above Logout. The role comes from /account/me, so
-  // "Manage accounts" follows a role change. This only decides which links
-  // appear: /admin and /account check the login and role themselves. They open
-  // in a new tab because leaving the chat page would lose the conversation.
+  // here when it opens, just above Logout. Who is logged in comes from
+  // /account/me, so "Manage accounts" follows a role change. This only decides
+  // which links appear: /admin and /account check the login and role
+  // themselves. They open in a new tab because leaving the chat page would
+  // lose the conversation.
+  //
+  // At a facility installation without logins, a guest sees only "Super user
+  // login" (in the same tab, since logging in starts a new chat anyway) and no
+  // Logout, because a guest has nothing to log out of.
   var SVG_OPEN =
     '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" ' +
     'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ml-auto">';
   var ACCOUNT_ITEMS = [
+    {
+      key: "login",
+      href: "/account/login",
+      label: "Super user login",
+      guestOnly: true,
+      sameTab: true,
+      icon:
+        SVG_OPEN +
+        '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/>' +
+        '<line x1="15" x2="3" y1="12" y2="12"/></svg>',
+    },
     {
       key: "password",
       href: "/account",
@@ -81,26 +97,35 @@
         '<path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
     },
   ];
-  var accountRole = null;
-  var roleLoading = false;
+  var accountMe = null; // {username, role, guest?} from /account/me
+  var meRequested = false;
+  var meLoading = false;
 
   function loadAccountRole() {
-    if (roleLoading) return;
-    roleLoading = true;
+    if (meLoading) return;
+    meLoading = true;
+    meRequested = true;
     fetch("/account/me", { credentials: "same-origin", cache: "no-store" })
       .then(function (r) {
         return r.ok ? r.json() : null;
       })
       .then(function (me) {
-        accountRole = me ? me.role : null;
+        accountMe = me;
       })
       .catch(function () {
-        accountRole = null;
+        accountMe = null;
       })
       .then(function () {
-        roleLoading = false;
+        meLoading = false;
         addAccountItems();
       });
+  }
+
+  function showsItem(item) {
+    if (!accountMe) return false;
+    if (accountMe.guest) return !!item.guestOnly;
+    if (item.guestOnly) return false;
+    return !item.superUserOnly || accountMe.role === "super_user";
   }
 
   function closeUserMenu() {
@@ -110,8 +135,10 @@
   function accountMenuItem(item, template) {
     var link = document.createElement("a");
     link.href = item.href;
-    link.target = "_blank";
-    link.rel = "noopener";
+    if (!item.sameTab) {
+      link.target = "_blank";
+      link.rel = "noopener";
+    }
     link.setAttribute("role", "menuitem");
     link.setAttribute("tabindex", "-1");
     // Same look as Logout. Its highlight follows focus.
@@ -140,17 +167,24 @@
     if (!own.length) return;
     var logout = own[own.length - 1];
     ACCOUNT_ITEMS.forEach(function (item) {
-      var show = !item.superUserOnly || accountRole === "super_user";
+      var show = showsItem(item);
       var existing = menu.querySelector('[data-emr-menu="' + item.key + '"]');
       if (show && !existing) logout.parentNode.insertBefore(accountMenuItem(item, logout), logout);
       if (!show && existing) existing.parentNode.removeChild(existing);
     });
+    var hideLogout = !!(accountMe && accountMe.guest);
+    if ((logout.style.display === "none") !== hideLogout) logout.style.display = hideLogout ? "none" : "";
   }
 
-  // Know the role before the menu is first opened; forget it after logging out.
+  // Know who is logged in before the menu is first opened; forget it after
+  // logging out.
   function trackAccount() {
-    if (!document.getElementById("user-nav-button")) accountRole = null;
-    else if (accountRole === null) loadAccountRole();
+    if (!document.getElementById("user-nav-button")) {
+      accountMe = null;
+      meRequested = false;
+    } else if (!meRequested) {
+      loadAccountRole();
+    }
   }
 
   // Debounce: streaming answers fire many DOM mutations; coalesce the rescans.

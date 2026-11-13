@@ -196,6 +196,12 @@ docker compose exec app python -m scripts.users list
 docker compose exec app python -m scripts.users reset <username>
 ```
 
+### Facility installation without logins
+
+At a facility, set `LOGIN_REQUIRED=false` in `.env`, then `docker compose up -d --force-recreate app`. Everyone then uses the assistant without logging in, with the ordinary user's limits, and the question log shows them as `guest`. Super users click the circle at the top right, then **Super user login** (or open `/account/login`).
+
+Only do this while the computer cannot be reached from the internet. The online server keeps logins for everyone.
+
 ### Stop the stack
 ```bash
 docker compose down
@@ -231,6 +237,70 @@ docker compose logs                 # all services together
 docker compose exec app bash        # inside the Python app
 docker compose exec db psql -U emr emr_helper   # psql against Postgres
 ```
+
+---
+
+## Online server (askeafya.com)
+
+The online trial runs this same Docker setup on a DigitalOcean server. Three things differ, all set in the server's `.env`: the answer model is hosted (Together AI), the site has a domain with automatic HTTPS, and it updates itself from GitHub. Buying the domain and creating the server are covered step by step in `EMR_Helper_Going_Online_Steps.html` in the project folder.
+
+### First installation
+
+On the server (`ssh root@<server IP>`):
+
+```bash
+git clone https://github.com/Murari161/emr_helper.git /opt/askeafya
+cd /opt/askeafya && cp .env.example .env && mkdir -p data/knowledge_base
+nano .env
+```
+
+In `.env`, set these (and leave everything else as it is):
+
+```
+CHAINLIT_AUTH_SECRET=<a new random string, see step 2>
+RERANKER_ENABLED=false
+GENERATION_PROVIDER=openai
+GENERATION_API_BASE=https://api.together.xyz/v1
+GENERATION_API_KEY=<the Together AI key>
+GENERATION_MODEL=meta-llama/Llama-3.2-3B-Instruct-Turbo
+COMPOSE_FILE=docker-compose.yml:docker-compose.server.yml
+DOMAIN=askeafya.com
+```
+
+From the laptop, in Git Bash, upload the manuals (the `[A-Z]` skips Word's `~$` temporary files):
+
+```bash
+scp /d/health_assistant/cleaned/[A-Z]*_cleaned.docx root@<server IP>:/opt/askeafya/data/knowledge_base/
+```
+
+Back on the server:
+
+```bash
+docker compose up -d --build
+docker compose exec ollama ollama pull bge-m3
+docker compose exec app python -m scripts.ingest /data/knowledge_base/
+docker compose exec app python -m scripts.users add admin --role super_user
+```
+
+Then open `https://askeafya.com`. The HTTPS certificate is created on the first visit, once the domain points at the server.
+
+A second domain, such as `askeafya.chat`, can forward to the main one: set `OTHER_DOMAINS=askeafya.chat www.askeafya.chat` in `.env`, point its DNS at the same server, and run `docker compose up -d --force-recreate caddy`.
+
+### Automatic updates
+
+Every push or merge to `main` runs `.github/workflows/deploy.yml`. It logs into the server with a deploy key that may run nothing but `scripts/deploy.sh`, which downloads `main`, rebuilds, runs the unit tests on the server, and restarts only if they pass. Otherwise the old version keeps running and the run shows red in the repository's **Actions** tab. Manuals, accounts and the question log are not touched.
+
+One-time setup, on the server:
+
+```bash
+ssh-keygen -t ed25519 -N "" -C github-deploy -f /root/.ssh/github_deploy
+echo "command=\"bash /opt/askeafya/scripts/deploy.sh\",restrict $(cat /root/.ssh/github_deploy.pub)" >> /root/.ssh/authorized_keys
+cat /root/.ssh/github_deploy
+```
+
+Copy the whole private key that the last command prints, then delete it from the server with `rm /root/.ssh/github_deploy`. In GitHub, open the repository's **Settings → Secrets and variables → Actions** and add three secrets: `DEPLOY_HOST` (the server's IP), `DEPLOY_USER` (`root`) and `DEPLOY_SSH_KEY` (the private key). Then **Actions → Deploy to askeafya.com → Run workflow** should turn green.
+
+To update by hand, run `bash /opt/askeafya/scripts/deploy.sh` on the server. To undo a bad change, revert its commit on GitHub; the revert deploys like any other change.
 
 ---
 

@@ -1,31 +1,31 @@
-"""Stream answers from Ollama, given a user query and retrieved context chunks.
+"""Stream answers, given a user query and retrieved context chunks.
 
 The function is one async generator: callers `async for token in stream_answer(...)`.
 That makes it trivial to pipe into Chainlit's `cl.Message.stream_token(...)`.
 
-Streaming is non-negotiable here. With llama3.2:3b on CPU, generating 200
-tokens (a typical procedure answer) takes ~6-15 seconds end-to-end. Without
-streaming, the user stares at nothing for that whole period; with streaming
-they see the first word in ~500 ms and the answer flows in front of them.
-The perceived latency drops by an order of magnitude.
+Streaming is non-negotiable here. With llama3.2:3b on CPU, a typical procedure
+answer takes many seconds end-to-end. Without streaming, the user stares at
+nothing for that whole period; with streaming they see the answer flow in
+front of them, so the perceived wait drops sharply.
 
-Ollama's /api/generate with stream=True returns one JSON-per-line, each
-with a 'response' field carrying the next token chunk and a 'done' field
-that's true on the final line. We forward 'response' strings as-is.
+Which model writes the answer (the local one or a hosted one) is decided in
+app/rag/llm.py by GENERATION_PROVIDER.
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any, AsyncIterator
 
-import httpx
-
 from app.config import settings
+from app.rag import llm
 from app.rag.fallback import NOT_COVERED_REPLY
 from app.rag.prompts import ANSWER_SYSTEM_PROMPT, build_user_prompt
 
 log = logging.getLogger(__name__)
+
+# Long answers tend to drift off-topic for a 3B model, and we want a
+# responsive chat.
+MAX_ANSWER_TOKENS = 800
 
 
 async def stream_answer(
@@ -34,7 +34,7 @@ async def stream_answer(
     *,
     temperature: float = 0.2,
 ) -> AsyncIterator[str]:
-    """Yield answer tokens as they come from Ollama.
+    """Yield answer tokens as the model writes them.
 
     Low temperature (0.2) keeps the model close to the source text — we
     want it to reproduce the manual's steps faithfully, not paraphrase
@@ -42,51 +42,23 @@ async def stream_answer(
 
     If there are no chunks (retrieval came back empty), we yield the fixed
     "not in the manuals — contact your Focal Person" message without calling
-    the LLM.
+    the model.
     """
     if not chunks:
         yield NOT_COVERED_REPLY
         return
 
-    user_prompt = build_user_prompt(query, chunks)
-    payload = {
-        "model": settings.generation_model,
-        "system": ANSWER_SYSTEM_PROMPT,
-        "prompt": user_prompt,
-        "stream": True,
-        "options": {
-            "temperature": temperature,
-            # Cap output length — long answers tend to drift off-topic for
-            # a 3B model and we want responsive UX.
-            "num_predict": 800,
-        },
-    }
-
     log.info(
-        "stream_answer: model=%s, %d chunks, query=%r",
+        "stream_answer: %s model=%s, %d chunks, query=%r",
+        llm.provider(),
         settings.generation_model,
         len(chunks),
         query[:80],
     )
-
-    timeout = httpx.Timeout(connect=10.0, read=600.0, write=10.0, pool=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream(
-            "POST",
-            f"{settings.ollama_base_url}/api/generate",
-            json=payload,
-        ) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line)
-                except json.JSONDecodeError:
-                    log.warning("Skipping non-JSON line from Ollama stream: %r", line)
-                    continue
-                token = data.get("response")
-                if token:
-                    yield token
-                if data.get("done"):
-                    return
+    async for token in llm.stream_completion(
+        ANSWER_SYSTEM_PROMPT,
+        build_user_prompt(query, chunks),
+        temperature=temperature,
+        max_tokens=MAX_ANSWER_TOKENS,
+    ):
+        yield token
