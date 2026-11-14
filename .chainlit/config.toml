@@ -36,7 +36,7 @@ custom_css = "/public/style.css?v=5"
 # boxes (.emr-caution / .emr-note) by their visible text, so the CSS can style
 # them regardless of Chainlit's internal class names. Also adds "Change your
 # password" and "Manage accounts" to the user menu at the top right.
-custom_js = "/public/script.js?v=5"
+custom_js = "/public/script.js?v=6"
 # CTA shown on the welcome screen above the suggested-question buttons.
 cot = "tool_call"
 

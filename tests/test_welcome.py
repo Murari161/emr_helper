@@ -40,6 +40,25 @@ def test_trial_note_wording() -> None:
     assert "faster" not in note and "patient names" not in note   # removed at the project lead's request
 
 
+def test_suggestion_buttons() -> None:
+    from app.ui import starters
+
+    actions = starters.suggestion_actions()
+    assert len(actions) == 4
+    assert all(a.name == "ask_suggestion" and a.label.startswith("💬 ") for a in actions)
+    assert [a.payload["question"] for a in actions] == [q for _, q in starters.SUGGESTIONS]
+    # Chainlit's starter cards ask the same questions.
+    assert [s.message for s in starters.get_starters()] == [q for _, q in starters.SUGGESTIONS]
+    # The page script gives these buttons the green style by their first character.
+    script = (Path(__file__).resolve().parents[1] / "public" / "script.js").read_text(encoding="utf-8")
+    assert "💬" in script
+
+
+def test_welcome_text_has_no_long_dashes() -> None:
+    # The project lead asked for the greeting's text without "—".
+    assert "—" not in welcome.GREETING and "—" not in welcome.TRIAL_NOTICE
+
+
 def test_opening_words_match_the_page_script() -> None:
     script = (Path(__file__).resolve().parents[1] / "public" / "script.js").read_text(encoding="utf-8")
     assert re.sub(r"\*", "", welcome.TRIAL_NOTICE).startswith("🧪 Trial version") and "Trial version" in script

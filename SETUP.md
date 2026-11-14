@@ -303,6 +303,26 @@ Copy the whole private key that the last command prints, then delete it from the
 
 To update by hand, run `bash /opt/askeafya/scripts/deploy.sh` on the server. To undo a bad change, revert its commit on GitHub; the revert deploys like any other change.
 
+### Changing the live site from your laptop
+
+On the laptop, in the project folder:
+
+1. Start from the latest `main`: `git checkout main`, then `git pull`.
+2. Make a branch for the change: `git checkout -b <short-name>`, for example `git checkout -b fix-greeting`.
+3. Make the change, then see it on the laptop: `docker compose restart app`. After changing `.chainlit/config.toml` or `.env`, use `docker compose up -d --force-recreate app` instead. After changing `public/style.css` or `public/script.js`, also raise its `?v=` number in `.chainlit/config.toml`, or browsers keep the old copy.
+4. Run the tests the server will run: `docker compose exec app python -m pytest -q --ignore=tests/test_db.py --ignore=tests/test_retrieval.py --ignore=tests/test_chunking.py`. They must all pass.
+5. Save and upload the branch: `git add -A`, then `git status` to check the list (`.env` and `data/` never appear; Git ignores them), then `git commit -m "What changed"` and `git push -u origin <short-name>`.
+6. Put it live by merging into `main`: `git checkout main`, `git merge <short-name>`, `git push`. (Or open a pull request on GitHub and merge it there.)
+7. Watch the repository's **Actions** tab. Green means the change is live, usually within a minute or two. Red means the tests failed on the server and the live site is still on the old version; open the run to see why.
+
+Not everything goes through Git:
+
+| To change… | Do this |
+|---|---|
+| The manuals | Upload the new `.docx` to `/opt/askeafya/data/knowledge_base/` on the server, then run the ingest there (see First installation). |
+| The server's settings (`.env`) | `ssh root@<server IP>`, edit `/opt/askeafya/.env`, then `docker compose up -d --force-recreate app` in `/opt/askeafya`. |
+| Accounts | **Manage accounts** in the app. |
+
 ---
 
 ## Troubleshooting

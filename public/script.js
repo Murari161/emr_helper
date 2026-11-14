@@ -15,8 +15,10 @@
 (function () {
   "use strict";
 
-  // Matches our action labels: "📄 Open: Employee Portal", "Open: Laboratory", etc.
-  var OPEN_RE = /^\s*(?:📄\s*)?Open:\s+/i;
+  // Matches our action labels: "📄 Open: Employee Portal", "Open: Laboratory",
+  // and the suggested questions under the greeting, "💬 Register a new patient"
+  // (app/ui/starters.py).
+  var OPEN_RE = /^\s*(?:(?:📄\s*)?Open:\s+|💬\s)/i;
 
   // Caution / Note lines in answers are Markdown blockquotes (app/rag/callouts.py).
   var CAUTION_RE = /^\s*(?:⚠️|⚠)?\s*Caution:/i;

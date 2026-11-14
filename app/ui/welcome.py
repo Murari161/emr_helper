@@ -17,11 +17,11 @@ TRIAL_NOTICE = (
 )
 
 GREETING = (
-    "👋 Hi! I'm the **eAFYA Assistant** — your guide to eAFYA, the "
+    "👋 Hi! I'm the **eAFYA Assistant**, your guide to eAFYA, the "
     "Ministry of Health EMR system.\n\n"
-    "Ask me how to do anything from the user manuals — registering a "
+    "Ask me how to do anything from the user manuals, such as registering a "
     "patient, queueing them for a doctor, closing a clinic session, "
-    "scheduling reminders, generating reports — and I'll walk you "
+    "scheduling reminders or generating reports, and I'll walk you "
     "through the steps with the **screenshots** from the manual.\n\n"
     "ℹ️ I **don't** read patient data and I **don't** give clinical "
     "advice. For clinical questions, please consult a clinician or "

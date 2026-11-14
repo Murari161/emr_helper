@@ -39,7 +39,7 @@ from app.rag.generator import stream_answer
 from app.rag.retriever import RetrievalResult, retrieve_scored
 from app.ui import admin
 from app.ui.figures import answer_with_figures
-from app.ui.starters import get_starters
+from app.ui.starters import get_starters, suggestion_actions
 from app.ui.welcome import welcome_messages
 
 # Eagerly load the cross-encoder at import time so the first user query
@@ -209,8 +209,11 @@ async def on_chat_start() -> None:
 
     log.info("on_chat_start: user=%s, conversation=%s", user_id, conv_id)
 
-    for text in welcome_messages(trial_notice=settings.trial_notice):
-        await cl.Message(content=text).send()
+    messages = welcome_messages(trial_notice=settings.trial_notice)
+    for i, text in enumerate(messages):
+        # The suggested questions go under the greeting, the last message.
+        actions = suggestion_actions() if i == len(messages) - 1 else []
+        await cl.Message(content=text, actions=actions).send()
     if account and account["must_change_password"]:
         await cl.Message(content=access.CHANGE_PASSWORD_REPLY).send()
 
@@ -637,6 +640,28 @@ async def on_open_reference(action: cl.Action) -> None:
             log.exception("Failed to persist reference-click turn")
     await cl.Message(content=f"📄 Opening **{query}**…").send()
     await _respond(query, conv_id, excluded=excluded, prefer_procedures=True)
+
+
+@cl.action_callback("ask_suggestion")
+async def on_suggestion(action: cl.Action) -> None:
+    """A suggested question under the greeting was clicked: show it as the
+    user's message and answer it, as if they had typed it."""
+    question = ((action.payload or {}).get("question") or "").strip()
+    if not question:
+        return
+    account, excluded = await _gate()
+    if account is None:
+        return
+    conv_id: UUID | None = cl.user_session.get("conversation_id")
+    if conv_id is None:
+        conv_id = await queries.create_conversation(user_id=account["username"])
+        cl.user_session.set("conversation_id", conv_id)
+    await cl.Message(content=question, type="user_message").send()
+    try:
+        await queries.record_message(conversation_id=conv_id, role="user", content=question)
+    except Exception:
+        log.exception("Failed to persist suggestion-click turn")
+    await _respond(question, conv_id, excluded=excluded)
 
 
 @cl.action_callback("open_topic")
