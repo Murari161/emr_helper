@@ -319,9 +319,37 @@ Not everything goes through Git:
 
 | To change… | Do this |
 |---|---|
-| The manuals | Upload the new `.docx` to `/opt/askeafya/data/knowledge_base/` on the server, then run the ingest there (see First installation). |
+| The manuals | Upload the new `.docx` and load it: see [Updating a manual](#updating-a-manual) below. |
 | The server's settings (`.env`) | `ssh root@<server IP>`, edit `/opt/askeafya/.env`, then `docker compose up -d --force-recreate app` in `/opt/askeafya`. |
 | Accounts | **Manage accounts** in the app. |
+
+### Updating a manual
+
+The manuals are not in Git. On the server they are kept in `/opt/askeafya/data/knowledge_base/`, which the app sees as `/data/knowledge_base/`. Work from the laptop whose SSH key the server accepts, in **PowerShell**: Windows has `scp` (copy) and `ssh` (run a command) built in, and they use that key.
+
+1. Upload the new file. This example uses the Pharmacy manual:
+
+   ```powershell
+   scp "D:\health_assistant\cleaned\Pharmacy_Management_Module_cleaned.docx" root@<server IP>:/opt/askeafya/data/knowledge_base/
+   ```
+
+2. Load it into the assistant. This takes up to about a minute:
+
+   ```powershell
+   ssh root@<server IP> "cd /opt/askeafya && docker compose exec -T app python -m scripts.ingest /data/knowledge_base/Pharmacy_Management_Module_cleaned.docx"
+   ```
+
+   To reload every manual instead, end the command at `/data/knowledge_base/`. That takes about 8 minutes for all 17.
+
+To drag and drop instead of step 1, use **WinSCP** (free, from winscp.net), which shows the server's folders like File Explorer. Create a new site with protocol **SFTP**, host `<server IP>` and user `root`. Under **Advanced → SSH → Authentication**, choose your key file, `C:\Users\<you>\.ssh\id_ed25519`, and accept when WinSCP offers to convert it. Log in, open `/opt/askeafya/data/knowledge_base/`, drag the `.docx` across to replace the old file, then do step 2.
+
+Keep in mind:
+
+- **One file per manual.** Give the new file the same name as the old one, so it replaces it. Otherwise delete the old file, or a later reload of the whole folder can bring the old version back.
+- **Keep the manual's first line unchanged.** The assistant recognises a manual by that title line, for example "Pharmacy Management Module". Under a new title it would keep the old version as well as the new one. The list of manuals limited to super users (`RESTRICTED_MODULES`) uses these titles too.
+- **Don't upload Word's temporary files**, whose names start with `~$`.
+- **No restart is needed.** Answers use the new version as soon as loading finishes. A browser that showed the old screenshots in the last few hours may keep showing them for a while; to check the new ones straight away, use a private window.
+- **Update the laptop too**, so both give the same answers: copy the file into `data\knowledge_base\` in the project folder, then run `docker compose exec app python -m scripts.ingest /data/knowledge_base/<file name>` there.
 
 ---
 
