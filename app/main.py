@@ -40,7 +40,7 @@ from app.rag.retriever import RetrievalResult, retrieve_scored
 from app.ui import admin
 from app.ui.figures import answer_with_figures
 from app.ui.starters import get_starters
-from app.ui.welcome import welcome_message
+from app.ui.welcome import welcome_messages
 
 # Eagerly load the cross-encoder at import time so the first user query
 # doesn't pay a multi-second model-load + first-time HuggingFace download.
@@ -209,7 +209,8 @@ async def on_chat_start() -> None:
 
     log.info("on_chat_start: user=%s, conversation=%s", user_id, conv_id)
 
-    await cl.Message(content=welcome_message(trial_notice=settings.trial_notice)).send()
+    for text in welcome_messages(trial_notice=settings.trial_notice):
+        await cl.Message(content=text).send()
     if account and account["must_change_password"]:
         await cl.Message(content=access.CHANGE_PASSWORD_REPLY).send()
 

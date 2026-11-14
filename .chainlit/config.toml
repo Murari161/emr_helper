@@ -31,12 +31,12 @@ default_theme = "light"
 # Served by Chainlit's static handler from the project's public/ folder.
 # BUMP ?v= WHENEVER style.css OR script.js CHANGES: browsers otherwise keep
 # using a cached copy, even after a hard refresh, and users miss the change.
-custom_css = "/public/style.css?v=3"
+custom_css = "/public/style.css?v=5"
 # Custom JS: tags the "Open: …" buttons (.emr-cta) and the Caution / Note
 # boxes (.emr-caution / .emr-note) by their visible text, so the CSS can style
 # them regardless of Chainlit's internal class names. Also adds "Change your
 # password" and "Manage accounts" to the user menu at the top right.
-custom_js = "/public/script.js?v=4"
+custom_js = "/public/script.js?v=5"
 # CTA shown on the welcome screen above the suggested-question buttons.
 cot = "tool_call"
 

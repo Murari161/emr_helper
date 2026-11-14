@@ -127,3 +127,47 @@ blockquote.emr-caution .font-bold {
 body:has(input[type="password"]) [data-sonner-toast] {
     display: none !important;
 }
+
+/* Green bar across the top (theme preview, variant B). The other greens come
+   from public/theme.json. */
+#header {
+    background-color: #0f5132 !important;
+}
+#header button,
+#header a {
+    color: #ffffff !important;
+}
+#header button:hover {
+    background-color: rgba(255, 255, 255, 0.15) !important;
+}
+#header #user-nav-button .bg-primary {
+    background-color: #ffffff !important;
+    color: #0f5132 !important;
+}
+.dark #header {
+    background-color: #0b3d26 !important;
+}
+
+/* Opening messages (app/ui/welcome.py, tagged by public/script.js): the trial
+   note and the greeting each sit on a light panel of their own colour. */
+.message-content.emr-trial,
+.message-content.emr-welcome {
+    border-radius: 12px;
+    padding: 14px 18px;
+}
+.message-content.emr-trial {
+    background-color: #fff6dc;      /* light amber: a notice */
+    border: 1px solid #f1d98f;
+}
+.message-content.emr-welcome {
+    background-color: #edf7f0;      /* light green: the theme */
+    border: 1px solid #cde6d6;
+}
+.dark .message-content.emr-trial {
+    background-color: rgba(230, 184, 74, 0.12);
+    border-color: rgba(230, 184, 74, 0.35);
+}
+.dark .message-content.emr-welcome {
+    background-color: rgba(40, 167, 69, 0.12);
+    border-color: rgba(40, 167, 69, 0.35);
+}

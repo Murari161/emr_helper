@@ -31,6 +31,8 @@ GREETING = (
 )
 
 
-def welcome_message(*, trial_notice: bool) -> str:
-    """The greeting, with the trial note first on the online trial."""
-    return f"{TRIAL_NOTICE}\n\n{GREETING}" if trial_notice else GREETING
+def welcome_messages(*, trial_notice: bool) -> list[str]:
+    """The opening messages, in order: the trial note (online trial only),
+    then the greeting. Separate messages, so each gets its own light
+    background (public/script.js tags them, public/style.css colours them)."""
+    return [TRIAL_NOTICE, GREETING] if trial_notice else [GREETING]

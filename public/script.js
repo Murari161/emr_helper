@@ -37,8 +37,26 @@
     }
   }
 
+  // The opening messages (app/ui/welcome.py): the trial note and the greeting
+  // each get their own light background. Found by their opening words.
+  var TRIAL_RE = /^\s*🧪\s*Trial version/;
+  var WELCOME_RE = /^\s*👋\s*Hi! I'm the eAFYA Assistant/;
+
+  function tagWelcome() {
+    var boxes = document.querySelectorAll(".message-content");
+    for (var i = 0; i < boxes.length; i++) {
+      var b = boxes[i];
+      // By class, not a marker: React resets className when it re-renders.
+      if (b.classList.contains("emr-trial") || b.classList.contains("emr-welcome")) continue;
+      var txt = (b.textContent || "").trim();
+      if (TRIAL_RE.test(txt)) b.classList.add("emr-trial");
+      else if (WELCOME_RE.test(txt)) b.classList.add("emr-welcome");
+    }
+  }
+
   function tag() {
     tagCallouts();
+    tagWelcome();
     var els = document.querySelectorAll('button, a, [role="button"]');
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
