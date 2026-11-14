@@ -125,9 +125,11 @@ def test_restricted_modules_line() -> None:
     assert "Human Resources Management and User and Facility Management are limited" in two
 
 
-def test_restricted_manuals_setting() -> None:
-    assert Settings(restricted_modules=" A Module, B Module ,,").restricted_manuals == ["A Module", "B Module"]
-    assert Settings().restricted_manuals == RESTRICTED
+def test_restricted_manuals_setting(monkeypatch) -> None:
+    monkeypatch.delenv("RESTRICTED_MODULES", raising=False)
+    assert Settings(_env_file=None, restricted_modules=" A Module, B Module ,,").restricted_manuals == [
+        "A Module", "B Module"]
+    assert Settings(_env_file=None).restricted_manuals == RESTRICTED
 
 
 SUMMARY = {

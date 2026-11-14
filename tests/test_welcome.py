@@ -23,10 +23,13 @@ from app.config import Settings
 from app.ui import welcome
 
 
-def test_trial_note_only_where_switched_on() -> None:
+def test_trial_note_only_where_switched_on(monkeypatch) -> None:
     assert welcome.welcome_messages(trial_notice=True) == [welcome.TRIAL_NOTICE, welcome.GREETING]
     assert welcome.welcome_messages(trial_notice=False) == [welcome.GREETING]
-    assert Settings().trial_notice is False                       # off unless the server's .env says so
+    # Off unless a .env switches it on. Read without this machine's settings:
+    # the online server's .env has TRIAL_NOTICE=true, which once failed this test there.
+    monkeypatch.delenv("TRIAL_NOTICE", raising=False)
+    assert Settings(_env_file=None).trial_notice is False
 
 
 def test_trial_note_wording() -> None:

@@ -289,7 +289,7 @@ A second domain, such as a later Ministry of Health address, can forward to the 
 
 ### Automatic updates
 
-Every push or merge to `main` runs `.github/workflows/deploy.yml`. It logs into the server with a deploy key that may run nothing but `scripts/deploy.sh`, which downloads `main`, rebuilds, runs the unit tests on the server, and restarts only if they pass. Otherwise the old version keeps running and the run shows red in the repository's **Actions** tab. Manuals, accounts and the question log are not touched.
+Every push or merge to `main` runs `.github/workflows/deploy.yml`. It logs into the server with a deploy key that may run nothing but `scripts/deploy.sh`. The script builds the new version in a separate copy and runs the unit tests there, without the server's settings, so test output can never contain the server's secrets. Only if they pass does the live copy switch and the app restart. Otherwise the live site keeps running the old version, untouched, and the run shows red in the repository's **Actions** tab. Manuals, accounts and the question log are not touched.
 
 One-time setup, on the server:
 

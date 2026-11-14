@@ -29,6 +29,7 @@ class Settings(BaseSettings):
         default="postgresql://emr:emr@db:5432/emr_helper",
         validation_alias="APP_DATABASE_URL",
         description="asyncpg-compatible Postgres DSN (env: APP_DATABASE_URL).",
+        repr=False,    # it holds the database password
     )
 
     # Ollama
@@ -57,7 +58,10 @@ class Settings(BaseSettings):
     # Search always stays local (bge-m3 on Ollama), whichever is chosen.
     generation_provider: str = Field(default="ollama")
     generation_api_base: str = Field(default="https://api.together.xyz/v1")
-    generation_api_key: str = Field(default="")
+    # repr=False on every secret: settings must never appear in an error
+    # message or log with a secret in them (a failed test once printed part
+    # of the server's login secret into a public GitHub log).
+    generation_api_key: str = Field(default="", repr=False)
 
     # Logins. True (the default): everyone logs in, as on the online trial,
     # which anyone with the address can reach. False: a facility installation;
@@ -102,7 +106,7 @@ class Settings(BaseSettings):
 
     # Chainlit. CHAINLIT_AUTH_SECRET signs the login cookie; it is required
     # once the login page is on. Generate one with: chainlit create-secret
-    chainlit_auth_secret: str = Field(default="")
+    chainlit_auth_secret: str = Field(default="", repr=False)
 
     # App
     app_log_level: str = Field(default="INFO")
