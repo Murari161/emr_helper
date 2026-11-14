@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     # reached from the internet.
     login_required: bool = Field(default=True)
 
+    # Online trial only: a note at the top of the greeting saying the site is
+    # a proof of concept and the assistant will be installed at facilities
+    # (app/ui/welcome.py).
+    trial_notice: bool = Field(default=False)
+
     # Retrieval match strength. A question is answered from the manuals only
     # if its best match clears ONE of these; otherwise it gets a fixed
     # "not covered / off-topic" reply (see app/rag/fallback.py). Calibrated on

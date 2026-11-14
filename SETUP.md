@@ -265,6 +265,7 @@ GENERATION_API_KEY=<the Together AI key>
 GENERATION_MODEL=zai-org/GLM-5.3-Flash
 COMPOSE_FILE=docker-compose.yml:docker-compose.server.yml
 DOMAIN=askeafya.chat
+TRIAL_NOTICE=true
 ```
 
 From the laptop, in Git Bash, upload the manuals (the `[A-Z]` skips Word's `~$` temporary files):

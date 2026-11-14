@@ -22,7 +22,7 @@ main() {
   local unit_tests=(
     tests/test_auth.py tests/test_access.py tests/test_admin.py tests/test_llm.py
     tests/test_fallback.py tests/test_figures.py tests/test_attribution.py
-    tests/test_canonical.py tests/test_topics.py tests/test_callouts.py
+    tests/test_canonical.py tests/test_topics.py tests/test_callouts.py tests/test_welcome.py
   )
 
   local previous
@@ -33,7 +33,11 @@ main() {
   target="$(git rev-parse HEAD)"
   echo "Updating ${previous:0:7} -> ${target:0:7}: $(git log -1 --format=%s)"
 
-  docker compose build app
+  if ! docker compose build app; then
+    echo "Build failed: staying on ${previous:0:7}."
+    git reset --quiet --hard "$previous"
+    exit 1
+  fi
   if ! docker compose run --rm --no-deps -T app python -m pytest -p no:cacheprovider -q "${unit_tests[@]}"; then
     echo "Tests failed: staying on ${previous:0:7}."
     git reset --quiet --hard "$previous"

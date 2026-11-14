@@ -1,0 +1,11 @@
+# Keep secrets and data out of the app image. Settings reach the app through
+# env_file at runtime, and data/ is mounted at runtime (docker-compose.yml).
+.env
+.env.*
+!.env.example
+data/
+.git/
+.github/
+.files/
+**/__pycache__/
+**/*.pyc

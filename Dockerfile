@@ -16,18 +16,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 WORKDIR /app
 
 # Install dependencies first (better layer caching).
-# README.md and the app/ package directory are needed because pyproject.toml
+# README.md and an app/ package directory are needed because pyproject.toml
 # declares `readme = "README.md"` and `packages = ["app"]`; hatchling reads
-# both at build time even for an editable install.
+# both at build time even for an editable install. A stand-in app/ is enough
+# (the real code is copied below), so a code change reuses this slow layer
+# instead of reinstalling every library: an update on the server takes about a
+# minute instead of about ten.
 COPY pyproject.toml README.md ./
-COPY app ./app
 # Install with [dev] extras so pytest/ruff are available inside the container.
 # The added bytes (~20 MB) are worth it: it lets us run the smoke tests with
 # `docker compose exec app pytest …` without a separate test image.
-RUN uv venv /opt/venv \
+RUN mkdir -p app && touch app/__init__.py \
+    && uv venv /opt/venv \
     && uv pip install --python /opt/venv/bin/python -e ".[dev]"
 
-# Copy the rest of the project (compose file, scripts, tests, Caddyfile, etc.).
+# Copy the code and the rest of the project (scripts, tests, Caddyfile, etc.).
+# .dockerignore keeps .env and data/ out.
 COPY . .
 
 # ---------- Stage 2: runtime ----------

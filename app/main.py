@@ -40,6 +40,7 @@ from app.rag.retriever import RetrievalResult, retrieve_scored
 from app.ui import admin
 from app.ui.figures import answer_with_figures
 from app.ui.starters import get_starters
+from app.ui.welcome import welcome_message
 
 # Eagerly load the cross-encoder at import time so the first user query
 # doesn't pay a multi-second model-load + first-time HuggingFace download.
@@ -208,21 +209,7 @@ async def on_chat_start() -> None:
 
     log.info("on_chat_start: user=%s, conversation=%s", user_id, conv_id)
 
-    await cl.Message(
-        content=(
-            "👋 Hi! I'm the **eAFYA Assistant** — your guide to eAFYA, the "
-            "Ministry of Health EMR system.\n\n"
-            "Ask me how to do anything from the user manuals — registering a "
-            "patient, queueing them for a doctor, closing a clinic session, "
-            "scheduling reminders, generating reports — and I'll walk you "
-            "through the steps with the **screenshots** from the manual.\n\n"
-            "ℹ️ I **don't** read patient data and I **don't** give clinical "
-            "advice. For clinical questions, please consult a clinician or "
-            "your clinical reference. For anything the manuals don't cover, "
-            f"contact your facility's **{fallback.FOCAL_PERSON}**.\n\n"
-            "Try one of the suggestions below, or ask anything in your own words."
-        ),
-    ).send()
+    await cl.Message(content=welcome_message(trial_notice=settings.trial_notice)).send()
     if account and account["must_change_password"]:
         await cl.Message(content=access.CHANGE_PASSWORD_REPLY).send()
 
